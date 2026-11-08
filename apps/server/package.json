@@ -1,0 +1,35 @@
+{
+  "name": "@workspace/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "test": "echo 'no tests' && exit 0",
+    "ci": "npm run lint && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^4.0.109",
+    "@workspace/agents": "workspace:*",
+    "ai": "^7.0.162",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^20",
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^10",
+    "tsx": "latest",
+    "typescript": "^5"
+  }
+}

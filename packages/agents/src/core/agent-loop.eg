@@ -1,0 +1,140 @@
+import { generateText, isStepCount } from "ai";
+import {
+  getModel,
+  getProviderOptions,
+  type ModelId,
+  type Effort,
+} from "../models/registry.js";
+import { buildSystemPrompt } from "./system-prompt.js";
+import { getToolsForMode } from "./tools/tool-manager.js";
+import type { AgentMode } from "./tools/tools-mode-types.js";
+import { buildMemoryContext, MEMORY_CONTEXT_GUIDANCE, memoryService } from "@workspace/memory";
+
+const MEMORY_OWNER_ID = process.env.PAME_OWNER_ID ?? "local";
+const VERBOSE = process.env.AGENT_VERBOSE === "true";
+
+function logStep(title: string, detail?: Record<string, unknown>) {
+  const t = new Date().toLocaleTimeString("en-GB");
+  const rest = detail ? " " + Object.entries(detail).map(([k, v]) => `${k}=${v}`).join(" ") : "";
+  console.log(`[agent][${t}] → ${title}${rest}`);
+}
+
+export async function runAgent(
+  prompt: string,
+  mode: AgentMode,
+  modelId: ModelId = "anthropic/claude-sonnet-4-5",
+  effort: Effort = "medium",
+) {
+  const config = getModel(modelId);
+  logStep("config", { model: modelId, effort, mode, owner: MEMORY_OWNER_ID });
+  const agentMode = getToolsForMode(mode);
+  logStep("tools-loaded", { tools: Object.keys(agentMode).join(",") });
+  const start = Date.now();
+
+  // PAME: recall memories relevant to THIS message — the brain remembers the
+  // connections, not the whole graph.
+  logStep("memory-recall-start", { query: prompt.slice(0, 80) });
+  const ctx = buildMemoryContext(MEMORY_OWNER_ID, prompt);
+  logStep("memory-recall-done", { memories: ctx.memories.length, tokens: ctx.tokenEstimate });
+  if (VERBOSE && ctx.memories.length) {
+    console.log("  memories:", ctx.memories.map((m) => `${m.memory.id.slice(0, 8)}(${m.memory.type})`).join(" "));
+  }
+  const skills = memoryService.loadSkills(MEMORY_OWNER_ID, prompt, 3);
+  logStep("skills-loaded", { count: skills.length, names: skills.map((s) => s.name).join(",") || "-" });
+  const memoryBlock = ctx.promptBlock ? `${MEMORY_CONTEXT_GUIDANCE}\n\n${ctx.promptBlock}` : "";
+  logStep("prompt-built", { sysChars: buildSystemPrompt(modelId, mode).length, memChars: memoryBlock.length });
+
+  console.log(`[agent] start model=${modelId} effort=${effort} mode=${mode}`);
+
+  let stepNo = 0;
+  logStep("llm-start", { chars: prompt.length });
+  const result = await generateText({
+    model: config.model,
+    system: buildSystemPrompt(modelId, mode) + (memoryBlock ? `\n\n${memoryBlock}` : ""),
+    prompt,
+    stopWhen: isStepCount(25),
+    tools: agentMode,
+    providerOptions: getProviderOptions(modelId, effort),
+    onStepStart: () => {
+      stepNo++;
+      logStep(`step-${stepNo}-start`);
+    },
+    onStepFinish: (step) => {
+      const tools = step.toolCalls?.map((c) => c.toolName).join(", ") || "-";
+      logStep(`step-${stepNo}-finish`, {
+        ms: Date.now() - start,
+        tools,
+        in: step.usage.inputTokens,
+        out: step.usage.outputTokens,
+        think: step.usage.outputTokenDetails?.reasoningTokens,
+      });
+      if (step.toolCalls?.length) {
+        for (const c of step.toolCalls) {
+          logStep(`  tool-call`, { name: c.toolName, args: JSON.stringify(c.input).slice(0, 200) });
+        }
+      }
+      if (step.toolResults?.length) {
+        for (const r of step.toolResults) {
+          logStep(`  tool-result`, { tool: r.toolName, ok: r.output ? "yes" : "?" });
+          if (VERBOSE) console.log("    →", JSON.stringify(r.output).slice(0, 300));
+        }
+      }
+    },
+  });
+  logStep("llm-done", { textChars: result.text.length, steps: result.steps.length });
+
+  // PAME: save this turn as an experience and learn from it.
+  // Every turn forms part of the brain — extraction runs afterwards.
+  try {
+    logStep("memory-save-start", { prompt: prompt.slice(0, 80) });
+    const saved = memoryService.remember({
+      ownerId: MEMORY_OWNER_ID,
+      content: prompt,
+      type: "message",
+    });
+    logStep("memory-saved", { exp: saved.experienceId.slice(0, 8), created: saved.created, merged: saved.merged });
+    // Toddler-learning: always remember what we did this turn ("Did: ..."),
+    // so the next turn begins knowing "what we are doing now" — one
+    // continuous stream, newest-first, never a per-session concept.
+    const toolsUsed = result.steps.flatMap((s) => s.toolCalls?.map((c) => c.toolName) ?? []);
+    logStep("tools-summary", { used: toolsUsed.join(",") || "-" });
+    if (result.text) {
+      const did = memoryService.remember({
+        ownerId: MEMORY_OWNER_ID,
+        content: `Did: ${result.text.slice(0, 900)}`,
+        type: "message",
+      });
+      logStep("did-saved", { created: did.created, merged: did.merged });
+      // Autonomous learning: if no skill fired for this prompt, distill
+      // what happened into a candidate skill so next time it starts smarter.
+      const usedSkills = ctx.promptBlock.includes("Skills you can use now") ? skills.length : 0;
+      logStep("skill-branch", { usedSkills });
+      if (usedSkills === 0) {
+        logStep("autonomous-distill-start");
+        const proposed = memoryService.proposeSkillFromExperience({
+          ownerId: MEMORY_OWNER_ID,
+          prompt,
+          response: result.text,
+          toolsUsed,
+        });
+        if (proposed.length > 0 && proposed[0]) {
+          logStep("autonomous-skill-proposed", { name: proposed[0].name, status: proposed[0].status });
+        } else {
+          logStep("autonomous-skill-none", { reason: "too short / duplicate / policy" });
+        }
+      } else {
+        // Evolve: promote/demote/archive skills by track record.
+        const evo = memoryService.evolveSkills(MEMORY_OWNER_ID);
+        logStep("skills-evolved", evo);
+      }
+    }
+  } catch (err) {
+    console.error("[agent] memory write failed:", err);
+  }
+
+  console.log(
+    `[agent] done in ${Date.now() - start}ms, steps=${result.steps.length}`,
+  );
+
+  return result;
+}

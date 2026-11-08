@@ -1,0 +1,39 @@
+{
+  "name": "@workspace/cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.tsx",
+    "build": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'no tests' && exit 0",
+    "ci": "npm run lint && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.7.0",
+    "@opentui/react": "^0.7.0",
+    "@workspace/agents": "workspace:*",
+    "commander": "^15.0.0",
+    "react": "^19.2.8"
+  },
+  "devDependencies": {
+    "@ai-sdk/anthropic": "^4.0.91",
+    "@ai-sdk/deepseek": "^3.0.75",
+    "@ai-sdk/google": "^4.0.107",
+    "@ai-sdk/groq": "^4.0.72",
+    "@ai-sdk/openai": "^4.0.104",
+    "@types/bun": "latest",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^10",
+    "typescript": "^5"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "@workspace/memory",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "test": "tsx scripts/agi-test.ts",
+    "test:dreamer": "tsx scripts/dreamer-test.ts",
+    "test:benchmark": "tsx scripts/benchmark-runner.ts",
+    "test:formula": "tsx scripts/formula-deep-test.ts",
+    "test:capture": "tsx scripts/capture-dedup-test.ts",
+    "test:all": "tsx scripts/agi-test.ts && tsx scripts/dreamer-test.ts && tsx scripts/formula-deep-test.ts && tsx scripts/capture-dedup-test.ts && tsx scripts/benchmark-runner.ts",
+    "ci": "npm test && npm run test:all"
+  },
+  "dependencies": {
+    "ai": "^7.0.162",
+    "better-sqlite3": "^13.0.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^20",
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^10",
+    "tsx": "latest",
+    "typescript": "^5"
+  },
+  "author": "Himanshu Arodia",
+  "license": "SEE LICENSE IN LICENSE"
+}

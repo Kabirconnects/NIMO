@@ -1,19 +1,53 @@
-import { Button } from "@workspace/ui/components/button";
+import { useState } from "react";
+import { Header } from "./components/header";
+import { ChatBox, type ChatSubmit } from "./components/chat-box";
+
+type Message = { role: "user" | "assistant"; text: string };
 
 export default function App() {
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  function handleSubmit({ prompt, modelId }: ChatSubmit) {
+    setMessages((current) => [
+      ...current,
+      { role: "user", text: prompt },
+      { role: "assistant", text: `(${modelId} is not connected yet)` },
+    ]);
+  }
+
   return (
-    <div className="flex min-h-svh p-6">
-      <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-        <div>
-          <h1 className="font-medium">Project ready!</h1>
-          <p>You may now add components and start building.</p>
-          <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2">Button</Button>
+    <div className="flex min-h-svh flex-col">
+      <Header />
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4">
+        <div className="flex flex-1 flex-col gap-4 py-6">
+          {messages.length === 0 ? (
+            <div className="m-auto text-center">
+              <h1 className="text-2xl font-medium text-foreground">
+                What can I help you with?
+              </h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Ask anything. Shift+Enter for a new line.
+              </p>
+            </div>
+          ) : (
+            messages.map((message, index) => (
+              <div
+                key={index}
+                className={
+                  message.role === "user"
+                    ? "ml-auto max-w-[80%] rounded-2xl bg-muted px-4 py-2 text-sm text-foreground"
+                    : "max-w-[80%] text-sm text-foreground"
+                }
+              >
+                {message.text}
+              </div>
+            ))
+          )}
         </div>
-        <div className="text-muted-foreground font-mono text-xs">
-          (Press <kbd>d</kbd> to toggle dark mode)
+        <div className="sticky bottom-0 bg-background pb-4">
+          <ChatBox onSubmit={handleSubmit} />
         </div>
-      </div>
+      </main>
     </div>
   );
 }

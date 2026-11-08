@@ -1,6 +1,6 @@
 import { Moon, Sun } from "lucide-react";
 import { Button } from "@workspace/ui/components/button";
-import Logo from "@workspace/ui/components/logo";
+import { SidebarTrigger } from "@workspace/ui/components/ui/sidebar";
 import { cn } from "@workspace/ui/lib/utils";
 import { useTheme } from "next-themes";
 
@@ -15,9 +15,8 @@ export function Header({ className }: { className?: string }) {
       )}
     >
       <div className="flex h-14 items-center justify-between px-6">
-        <div className="flex items-center gap-2 text-foreground dark:text-foreground">
-          <Logo className="text-foreground dark:text-foreground" />
-          <span className="font-medium text-foreground">Nimo</span>
+        <div className="flex items-center gap-1 text-foreground dark:text-foreground">
+          <SidebarTrigger />
         </div>
         <nav className="flex items-center gap-2">
           <Button

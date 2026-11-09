@@ -1,5 +1,12 @@
-import { ChatPage } from "@/features/chat/components/chat-page";
+import { ChatPage } from "@/features/chat/components/chat-page"
+import { Route, Routes } from "react-router-dom"
 
-export default function App() {
-  return <ChatPage />;
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<ChatPage />} />
+    </Routes>
+  )
 }
+
+export default App

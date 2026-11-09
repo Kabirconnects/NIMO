@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@workspace/ui/components/ui/sidebar";
+import { SidebarInset, SidebarProvider } from "@workspace/ui/components/ui/sidebar";
 import { TooltipProvider } from "@workspace/ui/components/ui/tooltip";
 import { Header } from "./components/header";
 import { AppSidebar } from "./components/app-sidebar";

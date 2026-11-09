@@ -8,6 +8,8 @@ const envSchema = z.object({
 
   PORT: z.coerce.number().int().positive().default(4000),
 
+  CLIENT_URL: z.string().default("http://localhost:3000"),
+
   HOST: z.string().default("127.0.0.1"),
 
   AI_MODEL: z.string().min(1, "AI_MODEL is required"),

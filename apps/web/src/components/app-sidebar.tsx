@@ -74,7 +74,7 @@ export function AppSidebar({
   onNewChat?: () => void;
   onDelete?: (id: string) => void;
 }) {
-  const { open, setOpen } = useSidebar();
+  const { open } = useSidebar();
   const [query, setQuery] = useState("");
 
   const normalized = query.trim().toLowerCase();

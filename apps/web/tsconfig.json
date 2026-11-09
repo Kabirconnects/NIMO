@@ -13,9 +13,11 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "types": ["vite/client"],
     "strict": true,
     "target": "ES2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts"],
+  "exclude": ["../../packages/ui"]
 }

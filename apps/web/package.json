@@ -14,6 +14,7 @@
     "ci": "npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.107.1",
     "@workspace/ui": "workspace:*",
     "axios": "^1.21.0",
     "lucide-react": "^1.70.0",

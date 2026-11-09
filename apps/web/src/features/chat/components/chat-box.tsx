@@ -21,9 +21,16 @@ import {
 } from "@workspace/ui/components/ui/select";
 import { cn } from "@workspace/ui/lib/utils";
 
-type Effort = "low" | "medium" | "high";
-
+type Effort = "none" | "low" | "medium" | "high";
+type EffortOption = "low" | "medium" | "high";
 type Model = { id: string; name: string };
+
+export type ChatSubmit = {
+  prompt: string;
+  modelId: string;
+  effort: Effort;
+  files: File[];
+};
 
 const MODEL_GROUPS: { label: string; models: Model[] }[] = [
   {
@@ -65,18 +72,11 @@ const MODEL_GROUPS: { label: string; models: Model[] }[] = [
   },
 ];
 
-const EFFORTS: { value: Effort; label: string; icon: typeof Zap }[] = [
+const EFFORTS: { value: EffortOption; label: string; icon: typeof Zap }[] = [
   { value: "low", label: "Fast", icon: Zap },
   { value: "medium", label: "Balanced", icon: Brain },
   { value: "high", label: "Deep", icon: Flame },
 ];
-
-export type ChatSubmit = {
-  prompt: string;
-  modelId: string;
-  effort: Effort;
-  files: File[];
-};
 
 export function ChatBox({
   className,

@@ -1,10 +1,15 @@
 /**
- * Deep test of the new multi-factor memory strength formula.
- * Research basis: A-MEM (2025) dynamic importance + HippoRAG PageRank + Ebbinghaus ageing.
- * Formula: final = 0.35*base*retention + 0.30*PageRank + 0.20*relevance + 0.15*recency
+ * Deep test of the multi-factor memory strength formula.
+ * Research basis: A-MEM (2025) dynamic importance + Ebbinghaus ageing.
+ * Formula: final = 0.35*relevance + 0.40*normalisedBase + 0.15*effectiveRecency + 0.10*confidence
  * where base = importance * (1 + log(1+degree)/log(1+maxDegree))
  *
- * Tests: retention class, graph centrality, PageRank, name vs denial, research hub vs leaf,
+ * PageRank was removed from the score: it was never computed in production and
+ * its 0.30 weight was permanently zero. Graph centrality still contributes
+ * through `base` (degree). Retention contributes exactly once via
+ * `effectiveRecency`.
+ *
+ * Tests: retention class, graph centrality, name vs denial, research hub vs leaf,
  * walking stable vs ephemeral, 5-month-old identity survival.
  */
 import * as fs from "node:fs";

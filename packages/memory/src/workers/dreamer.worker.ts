@@ -11,11 +11,18 @@
 // marked, not destroyed. Weak edges are only pruned when they have never
 // been reinforced (weight stays low) and carry no evidence.
 
-import { getDb, listActiveMemories, findMemory, updateMemory, insertRevision, recordAudit, edgesFrom } from "../storage/db.js";
-import type { MemoryNode } from "../domain/memory.types.js";
-import type { MemoryEdge } from "../domain/memory-edge.types.js";
-import { skillLifecycle } from "../skills/distill.js";
+import {
+  getDb,
+  listActiveMemories,
+  updateMemory,
+  insertRevision,
+  recordAudit,
+  deleteEdge,
+  withTransaction,
+} from "../storage/db.js";
 import type { Skill } from "../domain/skill.types.js";
+import { assessConflict } from "../graph/conflict.js";
+import { skillLifecycle } from "../skills/distill.js";
 
 export interface DreamerResult {
   merged: number;
@@ -24,15 +31,6 @@ export interface DreamerResult {
   promoted: number;
   demoted: number;
   archived: number;
-}
-
-function keywordOverlap(a: string[], b: string[]): number {
-  if (!a.length || !b.length) return 0;
-  const setA = new Set(a.map((k) => k.toLowerCase()));
-  const setB = new Set(b.map((k) => k.toLowerCase()));
-  const union = new Set([...setA, ...setB]);
-  const inter = [...setA].filter((x) => setB.has(x)).length;
-  return inter / Math.max(1, union.size);
 }
 
 function contentSimilarity(a: string, b: string): number {
@@ -75,16 +73,19 @@ function mergeNearDuplicates(ownerId: string): number {
       if (a.type !== b.type) continue;
 
       const sim = contentSimilarity(a.content, b.content);
-      const kwOverlap = keywordOverlap(a.keywords, b.keywords);
-      const isDup = sim >= 0.8 || (kwOverlap >= 0.6 && sim >= 0.6);
+      const assessment = assessConflict(a, b);
+      // Never merge a contradiction. Repetition also must not raise confidence.
+      const isDup =
+        assessment.kind === "duplicate" ||
+        (assessment.kind === "compatible" && sim >= 0.75);
 
       if (isDup) {
-        // Merge b's evidence into a, mark b superseded
+        // Merge b's evidence into a, mark b superseded.
         const mergedEvidence = [...a.evidence, ...b.evidence];
         const aAfter = updateMemory(a.id, ownerId, {
           evidence: mergedEvidence,
-          confidence: Math.min(1, Math.max(a.confidence, b.confidence)),
-          importance: Math.min(1, Math.max(a.importance, b.importance)),
+          confidence: a.confidence,
+          importance: Math.max(a.importance, b.importance),
           keywords: [...new Set([...a.keywords, ...b.keywords])],
           concepts: [...new Set([...a.concepts, ...b.concepts])],
         });
@@ -135,8 +136,8 @@ function pruneWeakEdges(ownerId: string): number {
     const evidenceIds = JSON.parse(String(r.evidence_ids ?? "[]")) as string[];
 
     if (confidence < 0.3 && weight < 0.2 && evidenceIds.length === 0) {
-      db.prepare("DELETE FROM memory_edges WHERE id = ?").run(String(r.id));
-      pruned++;
+      // deleteEdge repairs both endpoints' graph_degree.
+      if (deleteEdge(String(r.id), ownerId)) pruned++;
     }
   }
 
@@ -224,16 +225,18 @@ function reRankSkills(ownerId: string): { promoted: number; demoted: number; arc
  * idempotent by design. Returns summary of what happened.
  */
 export function runDreamer(ownerId: string): DreamerResult {
-  const merged = mergeNearDuplicates(ownerId);
-  const pruned = pruneWeakEdges(ownerId);
-  const skillResult = reRankSkills(ownerId);
+  return withTransaction(() => {
+    const merged = mergeNearDuplicates(ownerId);
+    const pruned = pruneWeakEdges(ownerId);
+    const skillResult = reRankSkills(ownerId);
 
-  return {
-    merged,
-    pruned,
-    reRanked: skillResult.reRanked,
-    promoted: skillResult.promoted,
-    demoted: skillResult.demoted,
-    archived: skillResult.archived,
-  };
+    return {
+      merged,
+      pruned,
+      reRanked: skillResult.reRanked,
+      promoted: skillResult.promoted,
+      demoted: skillResult.demoted,
+      archived: skillResult.archived,
+    };
+  });
 }

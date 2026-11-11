@@ -8,114 +8,147 @@ import {
 import { buildSystemPrompt } from "./system-prompt.js";
 import { getToolsForMode } from "./tools/tool-manager.js";
 import type { AgentMode } from "./tools/tools-mode-types.js";
-import { buildMemoryContext, MEMORY_CONTEXT_GUIDANCE, memoryService } from "@workspace/memory";
+import {
+  buildMemoryContext,
+  MEMORY_CONTEXT_GUIDANCE,
+  memoryService,
+  runWithMemoryContext,
+  localOwnerId,
+} from "@workspace/memory";
 
-const MEMORY_OWNER_ID = process.env.PAME_OWNER_ID ?? "local";
-// Set so tools can see the active mode: Chat/Plan don't have write tools
-// at all (enforced by tools-mode.config), Auto does. ALLOW_WRITE env is a
-// secondary belt-and-suspenders check.
-export function setAgentMode(m: AgentMode) { process.env.PAME_MODE = m; }
+/**
+ * @deprecated Mode is now request-scoped through the memory runtime context.
+ * Kept only so older callers do not break; it no longer changes permissions.
+ */
+export function setAgentMode(_m: AgentMode) {
+  /* no-op — see runWithMemoryContext */
+}
+
+export interface RunAgentOptions {
+  /**
+   * Authenticated owner id. Required in multi-user deployments; ignored as a
+   * fallback in deliberate local-dev mode. The model NEVER supplies this.
+   */
+  ownerId?: string | null;
+  /**
+   * Set by the server only when the human explicitly confirmed destructive
+   * operations for this turn. The model cannot set this.
+   */
+  destructiveConfirmed?: boolean;
+}
 
 export async function runAgent(
   prompt: string,
   mode: AgentMode,
   modelId: ModelId = "anthropic/claude-sonnet-4-5",
   effort: Effort = "medium",
+  options: RunAgentOptions = {},
 ) {
-  setAgentMode(mode);
-  const config = getModel(modelId);
-  const agentMode = getToolsForMode(mode);
-  const start = Date.now();
+  const ownerId = options.ownerId ?? localOwnerId();
 
-  // PAME: recall memories relevant to THIS message — the brain remembers the
-  // connections, not the whole graph.
-  const ctx = buildMemoryContext(MEMORY_OWNER_ID, prompt);
-  const skills = memoryService.loadSkills(MEMORY_OWNER_ID, prompt, 3);
-  const memoryBlock = ctx.promptBlock ? `${MEMORY_CONTEXT_GUIDANCE}\n\n${ctx.promptBlock}` : "";
+  // Establish identity + permissions for this request. Everything inside —
+  // including tool execution — inherits this context. Concurrent requests
+  // cannot see each other's owner.
+  return runWithMemoryContext(
+    { ownerId, mode, destructiveConfirmed: options.destructiveConfirmed === true },
+    async () => {
+      const config = getModel(modelId);
+      const agentMode = getToolsForMode(mode);
+      const start = Date.now();
 
-  console.log(`[agent] start model=${modelId} effort=${effort} mode=${mode}`);
+      // PAME: recall memories relevant to THIS message — the brain remembers
+      // the connections, not the whole graph.
+      const ctx = buildMemoryContext(ownerId, prompt);
+      const skills = memoryService.loadSkills(ownerId, prompt, 3);
+      const memoryBlock = ctx.promptBlock ? `${MEMORY_CONTEXT_GUIDANCE}\n\n${ctx.promptBlock}` : "";
 
-  const closingInstruction = "\n\nAfter all tool calls, end your turn with a short natural-language summary (1-2 sentences) of what you did. Blank text is never acceptable — always summarize, in plain English, what tools you called and what you learned.";
+      console.log(`[agent] start model=${modelId} effort=${effort} mode=${mode}`);
 
-  const result = await generateText({
-    model: config.model,
-    system: buildSystemPrompt(modelId, mode) + closingInstruction + (memoryBlock ? `\n\n${memoryBlock}` : ""),
-    prompt,
-    stopWhen: isStepCount(30),
-    tools: agentMode,
-    providerOptions: getProviderOptions(modelId, effort),
-    onStepFinish: (step) => {
-      console.log(
-        `[agent] +${Date.now() - start}ms`,
-        "tools:",
-        step.toolCalls?.map((c) => c.toolName).join(", ") || "-",
-        "in:",
-        step.usage.inputTokens,
-        "out:",
-        step.usage.outputTokens,
-        "think:",
-        step.usage.outputTokenDetails?.reasoningTokens,
-      );
-    },
-  });
+      const closingInstruction = "\n\nAfter all tool calls, end your turn with a short natural-language summary (1-2 sentences) of what you did. Blank text is never acceptable — always summarize, in plain English, what tools you called and what you learned.";
 
-  // PAME: save this turn as an experience and learn from it.
-  // Every turn forms part of the brain — extraction runs afterwards.
-  try {
-    memoryService.remember({
-      ownerId: MEMORY_OWNER_ID,
-      content: prompt,
-      type: "message",
-    });
-    // Toddler-learning: always remember what we did this turn ("Did: ..."),
-    // so the next turn begins knowing "what we are doing now" — one
-    // continuous stream, newest-first, never a per-session concept.
-    const toolsUsed = result.steps.flatMap((s) => s.toolCalls?.map((c) => c.toolName) ?? []);
-    if (result.text) {
-      memoryService.remember({
-        ownerId: MEMORY_OWNER_ID,
-        content: `Did: ${result.text.slice(0, 900)}`,
-        type: "message",
+      const result = await generateText({
+        model: config.model,
+        system: buildSystemPrompt(modelId, mode) + closingInstruction + (memoryBlock ? `\n\n${memoryBlock}` : ""),
+        prompt,
+        stopWhen: isStepCount(30),
+        tools: agentMode,
+        providerOptions: getProviderOptions(modelId, effort),
+        onStepFinish: (step) => {
+          console.log(
+            `[agent] +${Date.now() - start}ms`,
+            "tools:",
+            step.toolCalls?.map((c) => c.toolName).join(", ") || "-",
+            "in:",
+            step.usage.inputTokens,
+            "out:",
+            step.usage.outputTokens,
+            "think:",
+            step.usage.outputTokenDetails?.reasoningTokens,
+          );
+        },
       });
-      // Autonomous learning: if no skill fired for this prompt, distill
-      // what happened into a candidate skill so next time it starts smarter.
-      const usedSkills = ctx.promptBlock.includes("Skills you can use now") ? skills.length : 0;
-      if (usedSkills === 0) {
-        const proposed = memoryService.proposeSkillFromExperience({
-          ownerId: MEMORY_OWNER_ID,
-          prompt,
-          response: result.text,
-          toolsUsed,
+
+      // PAME: preserve this turn as an experience and learn from it.
+      try {
+        // The user's message is first-hand evidence → may form facts.
+        memoryService.remember({
+          ownerId,
+          content: prompt,
+          type: "message",
+          role: "user",
         });
-        if (proposed.length > 0 && proposed[0]) {
-          console.log(`[agent] autonomous skill proposed: ${proposed[0].name}`);
+
+        if (result.text) {
+          // The assistant's own output is preserved for continuity but is
+          // NOT independent evidence: extraction yields zero facts for it.
+          memoryService.remember({
+            ownerId,
+            content: result.text,
+            type: "message",
+            role: "assistant",
+          });
+
+          // Distill a candidate skill only when real tools were used — an
+          // assistant-only answer is not evidence that a procedure works.
+          const toolsUsed = result.steps.flatMap((s) => s.toolCalls?.map((c) => c.toolName) ?? []);
+          if (toolsUsed.length > 0) {
+            const proposed = memoryService.proposeSkillFromExperience({
+              ownerId,
+              prompt,
+              response: result.text,
+              toolsUsed,
+            });
+            if (proposed.length > 0 && proposed[0]) {
+              console.log(`[agent] autonomous skill proposed: ${proposed[0].name}`);
+            }
+          }
+
+          // Evolve: promote/demote/archive skills by track record.
+          const evo = memoryService.evolveSkills(ownerId);
+          if (evo.promoted || evo.archived) {
+            console.log(`[agent] skills evolved: +${evo.promoted} promoted, -${evo.archived} archived`);
+          }
         }
-      } else {
-        // Evolve: promote/demote/archive skills by track record.
-        const evo = memoryService.evolveSkills(MEMORY_OWNER_ID);
-        if (evo.promoted || evo.archived) {
-          console.log(`[agent] skills evolved: +${evo.promoted} promoted, -${evo.archived} archived`);
-        }
+      } catch (err) {
+        console.error("[agent] memory write failed:", err);
       }
-    }
-  } catch (err) {
-    console.error("[agent] memory write failed:", err);
-  }
 
-  // Fallback: never return blank text. If the model only called tools and
-  // didn't summarize, synthesize a summary from what actually happened.
-  if (!result.text.trim()) {
-    const toolsUsed = result.steps.flatMap((s) => s.toolCalls?.map((c) => c.toolName) ?? []);
-    const summary = toolsUsed.length > 0
-      ? `I used tools: ${toolsUsed.join(", ")}. See memory for details.`
-      : "I processed your request but had no additional output.";
-    (result as { text: string }).text = summary;
-    console.log(`[agent] empty-text fallback: "${summary}"`);
-  }
+      // Fallback: never return blank text. If the model only called tools and
+      // didn't summarize, synthesize a summary from what actually happened.
+      if (!result.text.trim()) {
+        const toolsUsed = result.steps.flatMap((s) => s.toolCalls?.map((c) => c.toolName) ?? []);
+        const summary = toolsUsed.length > 0
+          ? `I used tools: ${toolsUsed.join(", ")}. See memory for details.`
+          : "I processed your request but had no additional output.";
+        (result as { text: string }).text = summary;
+        console.log(`[agent] empty-text fallback: "${summary}"`);
+      }
 
-  console.log(
-    `[agent] done in ${Date.now() - start}ms, steps=${result.steps.length}`,
+      console.log(
+        `[agent] done in ${Date.now() - start}ms, steps=${result.steps.length}`,
+      );
+
+      return result;
+    },
   );
-
-  return result;
 }

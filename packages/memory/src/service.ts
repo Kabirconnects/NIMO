@@ -10,13 +10,20 @@ import type {
   RecallInput,
   RecallResult,
   CreateMemoryInput,
+  ForgetByQueryOptions,
+  ForgetByQueryResult,
 } from "./domain/service.types.js";
 import type { MemoryNode } from "./domain/memory.types.js";
 import type { MemoryRevision } from "./domain/governance.types.js";
 import { ingest } from "./ingestion/ingest.js";
 import { recall } from "./retrieval/search.js";
-import { forgetMemory } from "./governance/forget.js";
-import { evaluateWrite, DEFAULT_POLICY } from "./governance/policy.js";
+import { forgetMemory, forgetByQuery as forgetByQueryImpl } from "./governance/forget.js";
+import {
+  evaluateWrite,
+  DEFAULT_POLICY,
+  detectSecret,
+  redactSecrets,
+} from "./governance/policy.js";
 import { isDenial } from "./ingestion/validate.js";
 import { distillSkill, skillLifecycle } from "./skills/distill.js";
 import {
@@ -33,7 +40,57 @@ import {
   findSkill,
   listActiveSkills,
   updateSkill,
+  withTransaction,
 } from "./storage/db.js";
+
+/** A write was rejected by governance (secret, denial, forbidden field). */
+export class MemoryPolicyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MemoryPolicyError";
+  }
+}
+
+function assertWritableText(label: string, text: string | undefined): void {
+  if (!text) return;
+  const gate = evaluateWrite("create", text, DEFAULT_POLICY);
+  if (gate.decision === "deny") {
+    throw new MemoryPolicyError(`${label}: ${gate.reason}`);
+  }
+}
+
+function assertNotDenial(text: string): void {
+  if (isDenial(text)) {
+    throw new MemoryPolicyError(
+      "Agent denials (\"I do not have...\") are not durable memories — not stored.",
+    );
+  }
+}
+
+/** All human-visible fields that must pass the secret gate before a write. */
+function textFields(input: {
+  content?: string;
+  summary?: string;
+  whenToUse?: string;
+  name?: string;
+  steps?: string[];
+  keywords?: string[];
+  tags?: string[];
+  concepts?: string[];
+}): string {
+  return [
+    input.content,
+    input.summary,
+    input.whenToUse,
+    input.name,
+    ...(input.steps ?? []),
+    ...(input.keywords ?? []),
+    ...(input.tags ?? []),
+    ...(input.concepts ?? []),
+  ]
+    .filter((x): x is string => typeof x === "string" && x.length > 0)
+    .join("\n");
+}
 
 export const memoryService: MemoryService = {
   remember(input: IngestExperienceInput): IngestionResult {
@@ -41,43 +98,44 @@ export const memoryService: MemoryService = {
   },
 
   createMemory(input: CreateMemoryInput): MemoryNode {
-    const gate = evaluateWrite("create", input.content, DEFAULT_POLICY);
-    if (gate.decision === "deny") throw new Error(gate.reason);
-    if (isDenial(input.content)) {
-      // createMemory is an explicit caller instruction (benchmark corpus,
-      // agent tool "remember") — denial *content* of the agent's own
-      // state is not durable knowledge, so drop it loudly instead of
-      // silently inserting a node that poisons recall.
-      throw new Error("Agent denials (\"I do not have...\") are not durable memories — not stored.");
-    }
-
-    const node = insertMemory({
-      ownerId: input.ownerId,
-      type: input.type,
-      status: "active",
-      visibility: DEFAULT_POLICY.defaultVisibility,
+    assertWritableText("memory", textFields({
       content: input.content,
-      summary: input.summary ?? input.content.slice(0, 120),
-      concepts: input.concepts ?? [],
-      keywords: input.keywords ?? [],
-      tags: input.tags ?? [],
-      entities: input.entities ?? [],
-      confidence: input.confidence ?? 0.7,
-      importance: input.importance ?? 0.5,
-      retentionClass: input.type === "preference" || input.type === "decision" ? "stable" : "volatile",
-      evidence: input.evidence ?? [],
-      supersedes: [],
-    });
+      summary: input.summary,
+      keywords: input.keywords,
+      tags: input.tags,
+      concepts: input.concepts,
+    }));
+    assertNotDenial(input.content);
 
-    recordAudit({
-      ownerId: input.ownerId,
-      actor: "agent",
-      action: "create",
-      targetId: node.id,
-      reason: `created ${node.type}`,
-    });
+    return withTransaction(() => {
+      const node = insertMemory({
+        ownerId: input.ownerId,
+        type: input.type,
+        status: "active",
+        visibility: DEFAULT_POLICY.defaultVisibility,
+        content: input.content,
+        summary: input.summary ?? input.content.slice(0, 120),
+        concepts: input.concepts ?? [],
+        keywords: input.keywords ?? [],
+        tags: input.tags ?? [],
+        entities: input.entities ?? [],
+        confidence: input.confidence ?? 0.7,
+        importance: input.importance ?? 0.5,
+        retentionClass: input.type === "preference" || input.type === "decision" ? "stable" : "volatile",
+        evidence: input.evidence ?? [],
+        supersedes: [],
+      });
 
-    return node;
+      recordAudit({
+        ownerId: input.ownerId,
+        actor: "agent",
+        action: "create",
+        targetId: node.id,
+        reason: `created ${node.type}`,
+      });
+
+      return node;
+    });
   },
 
   recall(input: RecallInput): RecallResult {
@@ -86,44 +144,60 @@ export const memoryService: MemoryService = {
 
   update(memoryId: string, ownerId: string, changes: Partial<MemoryNode>): MemoryNode {
     const before = findMemory(memoryId, ownerId);
-    if (!before) throw new Error(`Memory ${memoryId} not found for owner ${ownerId}`);
+    if (!before) throw new MemoryPolicyError(`Memory ${memoryId} not found for owner ${ownerId}`);
 
-    const after = updateMemoryRow(memoryId, ownerId, changes);
-    if (!after) throw new Error(`Memory ${memoryId} not found for owner ${ownerId}`);
+    // Deletion has one path only (forget). Updates cannot fake it.
+    if (changes.status === "deleted") {
+      throw new MemoryPolicyError("Use forget() to delete a memory; update() cannot mark it deleted.");
+    }
 
-    // Preserve the version history — never silently rewrite.
-    insertRevision({
-      memoryId,
-      ownerId,
-      previousContent: before.content,
-      newContent: after.content,
-      reason: "consolidation",
-      evidenceIds: (after.evidence ?? []).map((e) => e.experienceId),
+    const nextText = textFields({
+      content: changes.content,
+      summary: changes.summary,
+      keywords: changes.keywords,
+      tags: changes.tags,
+      concepts: changes.concepts,
     });
+    assertWritableText("update", nextText);
+    if (changes.content !== undefined) assertNotDenial(changes.content);
 
-    recordAudit({
-      ownerId,
-      actor: "agent",
-      action: "update",
-      targetId: memoryId,
-      reason: "memory updated",
+    return withTransaction(() => {
+      const after = updateMemoryRow(memoryId, ownerId, changes);
+      if (!after) throw new MemoryPolicyError(`Memory ${memoryId} not found for owner ${ownerId}`);
+
+      // Preserve the version history — never silently rewrite. If the older
+      // body predates the current secret scanner, redact it before archiving.
+      insertRevision({
+        memoryId,
+        ownerId,
+        previousContent: detectSecret(before.content) ? redactSecrets(before.content) : before.content,
+        newContent: after.content,
+        reason: "consolidation",
+        evidenceIds: (after.evidence ?? []).map((e) => e.experienceId),
+      });
+
+      recordAudit({
+        ownerId,
+        actor: "agent",
+        action: "update",
+        targetId: memoryId,
+        reason: "memory updated",
+      });
+
+      return after;
     });
-
-    return after;
   },
 
   forget(memoryId: string, ownerId: string): void {
     forgetMemory(memoryId, ownerId);
   },
 
-  forgetByQuery(ownerId: string, query: string): number {
-    const result = recall({ ownerId, query, limit: 50 });
-    let n = 0;
-    for (const { memory } of result.memories) {
-      forgetMemory(memory.id, ownerId);
-      n++;
-    }
-    return n;
+  forgetByQuery(
+    ownerId: string,
+    query: string,
+    options: ForgetByQueryOptions = {},
+  ): ForgetByQueryResult {
+    return forgetByQueryImpl(ownerId, query, options);
   },
 
   linkMemories(
@@ -134,22 +208,28 @@ export const memoryService: MemoryService = {
     confidence: number,
     weight: number,
   ): void {
-    insertEdge({
-      ownerId,
-      fromMemoryId,
-      toMemoryId,
-      relation,
-      confidence,
-      weight,
-      evidenceIds: [],
-    });
-    // Supersession is a status change, not just an edge: flip the OLD
-    // memory to "superseded" so isRetrievable() hides it from recall.
-    // Without this, the old decision (e.g. PostgreSQL) still surfaces
-    // alongside the new one — the adaptation-axis "leak" failure.
-    if (relation === "supersedes") {
-      const before = findMemory(toMemoryId, ownerId);
-      if (before && before.status === "active") {
+    if (fromMemoryId === toMemoryId) {
+      throw new MemoryPolicyError("Cannot link a memory to itself.");
+    }
+    const from = findMemory(fromMemoryId, ownerId);
+    const to = findMemory(toMemoryId, ownerId);
+    if (!from || !to) {
+      throw new MemoryPolicyError("Cannot link: one or both memories do not exist for this owner.");
+    }
+
+    withTransaction(() => {
+      insertEdge({
+        ownerId,
+        fromMemoryId,
+        toMemoryId,
+        relation,
+        confidence,
+        weight,
+        evidenceIds: [],
+      });
+      // Supersession is a status change, not just an edge: flip the OLD
+      // memory to "superseded" so isRetrievable() hides it from recall.
+      if (relation === "supersedes" && to.status === "active") {
         updateMemoryRow(toMemoryId, ownerId, {
           status: "superseded",
           supersededBy: fromMemoryId,
@@ -157,19 +237,19 @@ export const memoryService: MemoryService = {
         insertRevision({
           memoryId: toMemoryId,
           ownerId,
-          previousContent: before.content,
-          newContent: before.content,
+          previousContent: detectSecret(to.content) ? redactSecrets(to.content) : to.content,
+          newContent: to.content,
           reason: "supersession",
           evidenceIds: [],
         });
       }
-    }
-    recordAudit({
-      ownerId,
-      actor: "agent",
-      action: "link",
-      targetId: toMemoryId,
-      reason: `${fromMemoryId} -[${relation}]-> ${toMemoryId}`,
+      recordAudit({
+        ownerId,
+        actor: "agent",
+        action: "link",
+        targetId: toMemoryId,
+        reason: `${fromMemoryId} -[${relation}]-> ${toMemoryId}`,
+      });
     });
   },
 
@@ -192,43 +272,57 @@ export const memoryService: MemoryService = {
   },
 
   teach(input: import("./domain/service.types.js").TeachInput): MemoryNode {
-    const gate = evaluateWrite("create", input.content, DEFAULT_POLICY);
-    if (gate.decision === "deny") throw new Error(gate.reason);
+    assertWritableText("teach", textFields({
+      content: input.content,
+      summary: input.summary,
+      keywords: input.keywords,
+      tags: input.tags,
+      concepts: input.concepts,
+    }));
+    assertNotDenial(input.content);
+
     const keywords = [...new Set([
       ...(input.keywords ?? []),
       ...(input.topic ? input.topic.toLowerCase().split(/\W+/).filter((w) => w.length >= 3) : []),
     ])];
-    const node = insertMemory({
-      ownerId: input.ownerId,
-      type: input.type,
-      status: "active",
-      visibility: DEFAULT_POLICY.defaultVisibility,
-      content: input.content,
-      summary: input.summary ?? input.content.slice(0, 120),
-      concepts: input.concepts ?? [],
-      keywords,
-      tags: [...new Set([...(input.tags ?? []), ...(input.topic ? [`teach:${input.topic}`] : [])])],
-      entities: input.entities ?? [],
-      confidence: input.confidence ?? 0.85,
-      importance: input.importance ?? 0.8,
-      retentionClass: "stable", // taught lessons are stable by definition
-      evidence: input.evidence ?? [],
-      supersedes: [],
+    return withTransaction(() => {
+      const node = insertMemory({
+        ownerId: input.ownerId,
+        type: input.type,
+        status: "active",
+        visibility: DEFAULT_POLICY.defaultVisibility,
+        content: input.content,
+        summary: input.summary ?? input.content.slice(0, 120),
+        concepts: input.concepts ?? [],
+        keywords,
+        tags: [...new Set([...(input.tags ?? []), ...(input.topic ? [`teach:${input.topic}`] : [])])],
+        entities: input.entities ?? [],
+        confidence: input.confidence ?? 0.85,
+        importance: input.importance ?? 0.8,
+        retentionClass: "stable", // taught lessons are stable by definition
+        evidence: input.evidence ?? [],
+        supersedes: [],
+      });
+      recordAudit({
+        ownerId: input.ownerId,
+        actor: "agent",
+        action: "create",
+        targetId: node.id,
+        reason: `teach ${node.type}${input.topic ? ` topic=${input.topic}` : ""}`,
+      });
+      return node;
     });
-    recordAudit({
-      ownerId: input.ownerId,
-      actor: "agent",
-      action: "create",
-      targetId: node.id,
-      reason: `teach ${node.type}${input.topic ? ` topic=${input.topic}` : ""}`,
-    });
-    return node;
   },
 
   createSkill(input: import("./domain/skill.types.js").CreateSkillInput): import("./domain/skill.types.js").Skill {
-    const gate = evaluateWrite("create", input.whenToUse + " " + input.steps.join(" "), DEFAULT_POLICY);
-    if (gate.decision === "deny") throw new Error(gate.reason);
-    return insertSkill(input);
+    assertWritableText("skill", textFields({
+      name: input.name,
+      whenToUse: input.whenToUse,
+      steps: input.steps,
+      keywords: input.keywords,
+      tags: input.tags,
+    }));
+    return withTransaction(() => insertSkill(input));
   },
 
   loadSkills(ownerId: string, query: string, limit = 5): import("./domain/skill.types.js").Skill[] {
@@ -255,29 +349,31 @@ export const memoryService: MemoryService = {
 
   useSkill(skillId: string, ownerId: string, outcome: import("./domain/skill.types.js").SkillOutcome): import("./domain/skill.types.js").Skill {
     const before = findSkill(skillId, ownerId);
-    if (!before) throw new Error(`Skill ${skillId} not found for owner ${ownerId}`);
+    if (!before) throw new MemoryPolicyError(`Skill ${skillId} not found for owner ${ownerId}`);
     const useCount = before.useCount + 1;
     const successCount = before.successCount + (outcome.success ? 1 : 0);
     const failureCount = before.failureCount + (outcome.success ? 0 : 1);
     const confidence = Math.min(1, Math.max(0, useCount > 0 ? successCount / useCount : before.confidence));
     // First success promotes the skill to active — rehearsal confirms it.
     const status = before.status === "candidate" && outcome.success ? "active" : before.status;
-    const after = updateSkill(skillId, ownerId, {
-      status,
-      useCount,
-      successCount,
-      failureCount,
-      confidence,
-      lastAccessedAt: new Date(),
-    })!;
-    recordAudit({
-      ownerId,
-      actor: "agent",
-      action: "update",
-      targetId: skillId,
-      reason: `skill ${outcome.success ? "succeeded" : "failed"} — ${outcome.evidence ?? ""}`.trim(),
+    return withTransaction(() => {
+      const after = updateSkill(skillId, ownerId, {
+        status,
+        useCount,
+        successCount,
+        failureCount,
+        confidence,
+        lastAccessedAt: new Date(),
+      })!;
+      recordAudit({
+        ownerId,
+        actor: "agent",
+        action: "update",
+        targetId: skillId,
+        reason: `skill ${outcome.success ? "succeeded" : "failed"} — ${outcome.evidence ?? ""}`.trim(),
+      });
+      return after;
     });
-    return after;
   },
 
   proposeSkillFromExperience(input: {
@@ -294,7 +390,11 @@ export const memoryService: MemoryService = {
       (s) => s.name === skillInput.name && s.whenToUse === skillInput.whenToUse,
     );
     if (dup) return [];
-    const gate = evaluateWrite("create", skillInput.whenToUse + " " + skillInput.steps.join(" "), DEFAULT_POLICY);
+    const gate = evaluateWrite(
+      "create",
+      textFields({ name: skillInput.name, whenToUse: skillInput.whenToUse, steps: skillInput.steps }),
+      DEFAULT_POLICY,
+    );
     if (gate.decision === "deny") return [];
     return [insertSkill(skillInput)];
   },

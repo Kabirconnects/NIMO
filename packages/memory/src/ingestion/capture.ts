@@ -11,6 +11,7 @@ export interface CaptureInput {
   type: ExperienceType;
   messageId?: string;
   occurredAt?: Date;
+  metadata?: Record<string, unknown>;
 }
 
 export function capture(input: CaptureInput): Experience {
@@ -20,5 +21,6 @@ export function capture(input: CaptureInput): Experience {
     type: input.type,
     messageId: input.messageId,
     occurredAt: input.occurredAt,
+    metadata: input.metadata,
   });
 }

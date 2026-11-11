@@ -72,6 +72,10 @@ const questions = [
   { id: "q13", query: "Quantum chromodynamics", category: "negative" as const, expectedMemoryIds: [] },
   { id: "q14", query: "Unicode normalization forms", category: "negative" as const, expectedMemoryIds: [] },
   { id: "q15", query: "Goal of the project", category: "direct" as const, expectedMemoryIds: [ids["Build a complete agent harness with memory system"]!] },
+  // Paraphrases: same answer, different surface words (no exact keyword match).
+  { id: "q16", query: "Which storage engine powers Nimo?", category: "semantic" as const, expectedMemoryIds: [ids["Nimo uses SQLite as local storage engine for memory persistence"]!] },
+  { id: "q17", query: "What kind of answers does the user like?", category: "semantic" as const, expectedMemoryIds: [ids["User prefers concise answers with code examples"]!] },
+  { id: "q18", query: "Tell me about the neuron firing concept", category: "semantic" as const, expectedMemoryIds: [ids["Spreading activation is how neurons fire through synapses"]!] },
 ];
 
 console.log("Running benchmark...\n");

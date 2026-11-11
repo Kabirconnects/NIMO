@@ -7,11 +7,14 @@
 //   A(v) = S(v,q) + λ · Σ w(u,v) · A(u)
 //
 // Bounded hops, per-hop decay (×0.6), no runaway re-visits.
+// This function is strictly READ-ONLY: recalling never reinforces an edge,
+// bumps a confidence, or changes graph degree.
 
 import type { RetrievedMemory } from "../domain/service.types.js";
 import type { MemoryNode } from "../domain/memory.types.js";
 import { isRetrievable } from "../governance/policy.js";
 import { edgesFrom, findMemory } from "../storage/db.js";
+import { computeFinalScore } from "./rank.js";
 
 const LAMBDA = 0.5; // neighbor influence
 const DECAY = 0.6;  // per-hop decay
@@ -21,74 +24,77 @@ export function activate(
   seeds: RetrievedMemory[],
   maxHops = 2,
 ): RetrievedMemory[] {
-  if (seeds.length === 0) return seeds;
+  if (seeds.length === 0) return [];
   const hops = Math.min(maxHops, 4);
 
   const activation = new Map<string, number>(); // memoryId -> A(v)
   const matchedBy = new Map<string, RetrievedMemory["matchedBy"]>();
   const nodes = new Map<string, MemoryNode>();
+  const seedById = new Map<string, RetrievedMemory>();
 
-  // Seeds start at their keyword score.
+  // Seeds start at their already-computed final score.
   for (const s of seeds) {
     activation.set(s.memory.id, s.score);
     matchedBy.set(s.memory.id, [...s.matchedBy]);
     nodes.set(s.memory.id, s.memory);
+    seedById.set(s.memory.id, s);
   }
 
-  // Spread through the graph.
+  // Spread through the graph. Hidden/superseded nodes are not traversed —
+  // otherwise a forgotten belief could still relay activation to an active one.
   let frontier = seeds.map((s) => ({ id: s.memory.id, value: s.score }));
   for (let hop = 0; hop < hops; hop++) {
     const next: { id: string; value: number }[] = [];
     for (const { id, value } of frontier) {
+      if (!nodes.has(id)) continue;
       for (const edge of edgesFrom(id, ownerId)) {
         const peerId = edge.toMemoryId;
-        const inc = LAMBDA * edge.weight * value * (DECAY ** hop);
-        const cur = activation.get(peerId) ?? 0;
-        const nextValue = Math.max(cur, inc);
-        if (nextValue > cur) activation.set(peerId, nextValue);
+        const peer = nodes.get(peerId) ?? findMemory(peerId, ownerId);
+        if (!peer || !isRetrievable(peer, ownerId)) continue;
 
         if (!nodes.has(peerId)) {
-          const node = findMemory(peerId, ownerId);
-          if (node && isRetrievable(node, ownerId)) {
-            nodes.set(peerId, node);
-            matchedBy.set(peerId, ["graph"]);
-          }
+          nodes.set(peerId, peer);
+          matchedBy.set(peerId, ["graph"]);
         } else if (!matchedBy.get(peerId)?.includes("graph")) {
           matchedBy.get(peerId)!.push("graph");
         }
-        next.push({ id: peerId, value: nextValue });
+
+        const inc = LAMBDA * edge.weight * value * (DECAY ** hop);
+        const cur = activation.get(peerId) ?? 0;
+        if (inc > cur) {
+          activation.set(peerId, inc);
+          next.push({ id: peerId, value: inc });
+        }
       }
     }
     frontier = next;
     if (frontier.length === 0) break;
   }
 
-  // Blend activation into the final score.
-  // Activation spreads through the graph, but stable memories resist decay.
+  // Score each node exactly once. Seeds keep their hybrid score; graph-only
+  // neighbours use activation as relevance. Base/recency/confidence are not
+  // re-added a second time.
   const out: RetrievedMemory[] = [];
   for (const [memId, a] of activation) {
     const node = nodes.get(memId);
     if (!node) continue;
-    const base = seeds.find((s) => s.memory.id === memId)?.score ?? 0;
-    // Stable memories get bonus (they are core knowledge, not fading observations)
-    const stabilityBonus = node.retentionClass === "stable" ? 0.1 : 0;
-    const score = Math.max(base, a) + node.importance * 0.05 + stabilityBonus;
+    const seed = seedById.get(memId);
+    const score = seed ? seed.score : computeFinalScore(node, Math.min(1, a));
     out.push({
       memory: node,
-      score: Math.min(2, score),  // allow up to 2.0 for multi-factor scoring
+      score,
       matchedBy: matchedBy.get(memId) ?? ["graph"],
       relatedMemoryIds: relatedIds(memId, ownerId),
       evidence: node.evidence,
     });
   }
 
-  // Sort by score (multi-factor), not pure recency.
   out.sort((x, y) => {
     if (y.score !== x.score) return y.score - x.score;
     const ty = y.memory.updatedAt.getTime();
     const tx = x.memory.updatedAt.getTime();
     if (ty !== tx) return ty - tx;
-    return y.memory.importance - x.memory.importance;
+    return x.memory.id.localeCompare(y.memory.id);
   });
   return out;
 }

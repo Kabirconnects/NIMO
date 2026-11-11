@@ -48,6 +48,12 @@ export interface AxisResult {
   latencyMs: number;
   /** Did the stable/important memory beat the ephemeral/junk one? */
   beatJunk: boolean | null; // null = no junk in this question
+  /** True when the question's correct answer is "nothing stored". */
+  noAnswer: boolean;
+  /** Retrieved memories that should not have been returned. */
+  falsePositives: number;
+  /** Top-K contents actually returned (for debugging failed questions). */
+  retrievedContents: string[];
   pass: boolean;
 }
 
@@ -59,6 +65,9 @@ export interface AxisSummary {
   meanLatencyMs: number;
   passRate: number;
   total: number;
+  /** Accuracy on questions whose correct answer is "no memory exists". */
+  noAnswerAccuracy: number;
+  noAnswerQuestions: number;
   /** The bad news: which questions failed and why. */
   failures: { id: string; query: string; reason: string }[];
 }
@@ -71,8 +80,32 @@ export function runAxisQuestion(ownerId: string, q: AxisQuestion, k = 8): AxisRe
   const latencyMs = Date.now() - start;
 
   const contents = result.memories.map((r) => r.memory.content);
+  const leaked = q.absent?.filter((a) => contents.some((c) => c.includes(a))) ?? [];
+  const noAnswer = q.expect.length === 0;
+
+  if (noAnswer) {
+    // Correct answer is "nothing". Every retrieved memory is a false positive,
+    // including an absent leak. Empty expect must never auto-pass.
+    const falsePositives = contents.length + leaked.length;
+    const clean = falsePositives === 0;
+    return {
+      axis: q.axis,
+      id: q.id,
+      query: q.query,
+      recallAtK: clean ? 1 : 0,
+      precisionAtK: clean ? 1 : 0,
+      mrr: clean ? 1 : 0,
+      latencyMs,
+      beatJunk: clean,
+      noAnswer: true,
+      falsePositives,
+      retrievedContents: contents,
+      pass: clean,
+    };
+  }
+
   const found = q.expect.filter((e) => contents.some((c) => c.includes(e)));
-  const recallAtK = q.expect.length === 0 ? 1 : found.length / q.expect.length;
+  const recallAtK = found.length / q.expect.length;
   const precisionAtK = contents.length === 0 ? 0
     : contents.filter((c) => q.expect.some((e) => c.includes(e))).length / contents.length;
 
@@ -93,19 +126,36 @@ export function runAxisQuestion(ownerId: string, q: AxisQuestion, k = 8): AxisRe
     }
   }
 
-  const leaked = q.absent?.some((a) => contents.some((c) => c.includes(a))) ?? false;
-  const pass = recallAtK > 0 && !leaked && (beatJunk !== false);
+  const pass = recallAtK > 0 && leaked.length === 0 && (beatJunk !== false);
 
-  return { axis: q.axis, id: q.id, query: q.query, recallAtK, precisionAtK, mrr, latencyMs, beatJunk, pass };
+  return {
+    axis: q.axis,
+    id: q.id,
+    query: q.query,
+    recallAtK,
+    precisionAtK,
+    mrr,
+    latencyMs,
+    beatJunk,
+    noAnswer: false,
+    falsePositives: leaked.length,
+    retrievedContents: contents,
+    pass,
+  };
 }
 
 export function runAxis(ownerId: string, questions: AxisQuestion[], k = 8): { results: AxisResult[]; summary: AxisSummary } {
   const results = questions.map((q) => runAxisQuestion(ownerId, q, k));
   const n = results.length;
+  const noAnswer = results.filter((r) => r.noAnswer);
   const failures = results.filter((r) => !r.pass).map((r) => ({
     id: r.id,
     query: r.query,
-    reason: r.recallAtK === 0 ? "not found in top-K" : "leak: absent memory surfaced",
+    reason: r.noAnswer
+      ? `false positive: ${r.falsePositives} unrelated memories returned`
+      : r.recallAtK === 0
+        ? "not found in top-K"
+        : "leak: absent memory surfaced",
   }));
   const summary: AxisSummary = {
     axis: questions[0]!.axis,
@@ -115,6 +165,10 @@ export function runAxis(ownerId: string, questions: AxisQuestion[], k = 8): { re
     meanLatencyMs: results.reduce((s, r) => s + r.latencyMs, 0) / Math.max(1, n),
     passRate: results.filter((r) => r.pass).length / Math.max(1, n),
     total: n,
+    noAnswerAccuracy: noAnswer.length > 0
+      ? noAnswer.filter((r) => r.falsePositives === 0).length / noAnswer.length
+      : 0,
+    noAnswerQuestions: noAnswer.length,
     failures,
   };
   return { results, summary };
@@ -135,6 +189,9 @@ export function formatAxisReport(summaries: AxisSummary[]): string {
   for (const s of summaries) {
     const icon = s.passRate === 1 ? "✅" : s.passRate >= 0.7 ? "⚠️ " : "❌";
     lines.push(`${icon} ${s.axis.toUpperCase().padEnd(12)} pass ${Math.round(s.passRate * 100)}% (${s.total - s.failures.length}/${s.total})  recall ${(s.meanRecall * 100).toFixed(0)}%  MRR ${s.meanMRR.toFixed(2)}  ${s.meanLatencyMs.toFixed(1)}ms`);
+    if (s.noAnswerQuestions > 0) {
+      lines.push(`     no-answer accuracy ${Math.round(s.noAnswerAccuracy * 100)}% (${s.noAnswerQuestions} questions; false positives fail)`);
+    }
     for (const f of s.failures) {
       lines.push(`     ❌ ${f.id}: "${f.query}" — ${f.reason}`);
     }

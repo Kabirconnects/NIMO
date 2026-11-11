@@ -17,17 +17,33 @@ import { capture } from "./capture.js";
 import { extractCandidates } from "./extract.js";
 import { validateCandidates } from "./validate.js";
 import { consolidate } from "./consolidate.js";
-import { DEFAULT_POLICY } from "../governance/policy.js";
+import { DEFAULT_POLICY, detectSecret, redactSecrets } from "../governance/policy.js";
+import { withTransaction } from "../storage/db.js";
 
 export function ingest(input: IngestExperienceInput): IngestionResult {
+  // 0. Secret gate runs BEFORE capture. A turn containing credentials is
+  //    recorded only in redacted form — the raw secret must never reach the
+  //    experiences table (it would otherwise survive every later cleanup).
+  const secret = detectSecret(input.content);
+  const safeContent = secret ? redactSecrets(input.content) : input.content;
+
   // 1. Capture always happens — every turn is preserved as an experience.
   const experience = capture({
     ownerId: input.ownerId,
-    content: input.content,
+    content: safeContent,
     type: input.type,
     messageId: input.messageId,
     occurredAt: input.occurredAt,
+    metadata: secret ? { redacted: true, reason: "secret" } : undefined,
   });
+
+  if (secret) {
+    return {
+      experienceId: experience.id,
+      created: 0, updated: 0, merged: 0, linked: 0, rejected: 1,
+      memoryIds: [],
+    };
+  }
 
   if (!DEFAULT_POLICY.allowAutomaticCapture) {
     return {
@@ -37,8 +53,9 @@ export function ingest(input: IngestExperienceInput): IngestionResult {
     };
   }
 
-  // 2. Extract candidates (greetings yield zero candidates).
-  const candidates = extractCandidates(input.content);
+  // 2. Extract candidates. Role matters: assistant/system text yields no
+  //    factual memories (it is captured as an experience above).
+  const candidates = extractCandidates(input.content, { role: input.role });
   if (candidates.length === 0) {
     return {
       experienceId: experience.id,
@@ -57,8 +74,9 @@ export function ingest(input: IngestExperienceInput): IngestionResult {
     };
   }
 
-  // 4. Consolidate: create / merge / link.
-  const out = consolidate(input.ownerId, accepted, experience.id);
+  // 4. Consolidate atomically: create / merge / link / revision writes either
+  //    all land or none do.
+  const out = withTransaction(() => consolidate(input.ownerId, accepted, experience.id));
 
   return {
     experienceId: experience.id,

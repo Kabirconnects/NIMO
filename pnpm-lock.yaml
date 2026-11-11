@@ -90,6 +90,9 @@ importers:
       '@workspace/agents':
         specifier: workspace:*
         version: link:../../packages/agents
+      '@workspace/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       ai:
         specifier: ^7.0.162
         version: 7.0.164(zod@4.6.7)

@@ -1,19 +1,24 @@
 import type { AgentMode, ModeConfig } from "./tools-mode-types.js";
 
-const MEMORY_TOOLS = [
-  "remember",
+// Memory tools are split by capability so Chat/Plan cannot write or delete.
+const MEMORY_READ_TOOLS = [
   "recall",
-  "linkMemories",
-  "updateMemory",
-  "forgetMemory",
   "getRelatedMemories",
   "getMemoryHistory",
-  "teach",
-  "teachSkill",
-  "useSkill",
   "loadSkills",
   "getRecent",
 ];
+
+const MEMORY_WRITE_TOOLS = [
+  "remember",
+  "linkMemories",
+  "updateMemory",
+  "teach",
+  "teachSkill",
+  "useSkill",
+];
+
+const MEMORY_DESTRUCTIVE_TOOLS = ["forgetMemory"];
 
 const RESEARCH_TOOLS = ["webFetch", "extractData", "summarize"];
 const READ_TOOLS = ["listFiles", "readFile", "search", "explainFile", "listWorkspaceTools", "callWorkspaceTool"];
@@ -24,8 +29,8 @@ export function getModeConfig(mode: AgentMode): ModeConfig {
     case "Chat":
       return {
         id: "Chat",
-        description: "Agent-in-conversation — chat, but still learns and remembers every turn",
-        tools: [...MEMORY_TOOLS, ...RESEARCH_TOOLS],
+        description: "Agent-in-conversation — read-only memory, still learns via server-side capture",
+        tools: [...MEMORY_READ_TOOLS, ...RESEARCH_TOOLS],
         allowWrite: false,
         allowShell: false,
       };
@@ -34,7 +39,7 @@ export function getModeConfig(mode: AgentMode): ModeConfig {
       return {
         id: "Plan",
         description: "Analyze tasks and create plans (read-only orientation)",
-        tools: [...READ_TOOLS, ...MEMORY_TOOLS, ...RESEARCH_TOOLS],
+        tools: [...READ_TOOLS, ...MEMORY_READ_TOOLS, ...RESEARCH_TOOLS],
         allowWrite: false,
         allowShell: false,
       };
@@ -43,7 +48,14 @@ export function getModeConfig(mode: AgentMode): ModeConfig {
       return {
         id: "Auto",
         description: "Autonomously execute development tasks + verify with tests",
-        tools: [...READ_TOOLS, ...WRITE_TOOLS, ...MEMORY_TOOLS, ...RESEARCH_TOOLS],
+        tools: [
+          ...READ_TOOLS,
+          ...WRITE_TOOLS,
+          ...MEMORY_READ_TOOLS,
+          ...MEMORY_WRITE_TOOLS,
+          ...MEMORY_DESTRUCTIVE_TOOLS,
+          ...RESEARCH_TOOLS,
+        ],
         allowWrite: true,
         allowShell: false,
       };

@@ -271,7 +271,7 @@ console.log("\n--- [CORTEX] Governance ---");
 
 check(containsExcludedContent("my password is 123", DEFAULT_POLICY), "[CORTEX] password blocked");
 check(containsExcludedContent("api_key: sk-123", DEFAULT_POLICY), "[CORTEX] api_key blocked");
-check(containsExcludedContent("secret token abc", DEFAULT_POLICY), "[CORTEX] secret blocked");
+check(containsExcludedContent("client_secret=hunter2abc", DEFAULT_POLICY), "[CORTEX] secret blocked");
 check(!containsExcludedContent("normal content about robots", DEFAULT_POLICY), "[CORTEX] normal content allowed");
 
 const gateSecret = evaluateWrite("create", "api_key: abc123", DEFAULT_POLICY);
@@ -322,8 +322,22 @@ check(!relatedAfterForget.some((n) => n.id === toForget.id), "[FORGETTING] edges
 const recallForgotten = memoryService.recall({ ownerId: OWNER, query: "xyzforgetme", limit: 10 });
 check(!recallForgotten.memories.some((r) => r.memory.id === toForget.id), "[FORGETTING] deleted memory not in recall");
 
-const forgetCount = memoryService.forgetByQuery(OWNER, "SQLite");
-check(typeof forgetCount === "number", "[FORGETTING] forgetByQuery returns count", `${forgetCount}`);
+const forgetPreview = memoryService.forgetByQuery(OWNER, "SQLite");
+check(forgetPreview.preview === true, "[FORGETTING] forgetByQuery previews by default");
+check(forgetPreview.deleted === 0, "[FORGETTING] preview deletes nothing");
+check(forgetPreview.matches.length > 0, "[FORGETTING] preview lists direct matches", `${forgetPreview.matches.length}`);
+
+const forgetConfirmed = memoryService.forgetByQuery(OWNER, "SQLite", { confirm: true });
+check(forgetConfirmed.preview === false, "[FORGETTING] explicit confirm performs deletion");
+check(
+  forgetConfirmed.deleted === forgetPreview.matches.length,
+  "[FORGETTING] confirmed deletion count matches preview",
+  `${forgetConfirmed.deleted}`,
+);
+check(
+  forgetConfirmed.matches.every((m) => findMemory(m.id, OWNER)?.status === "deleted"),
+  "[FORGETTING] every confirmed match is really deleted",
+);
 
 // Re-create SQLite fact for remaining tests
 memoryService.createMemory({ ownerId: OWNER, type: "fact", content: "Nimo uses SQLite storage engine for memory", keywords: ["sqlite","storage"] });

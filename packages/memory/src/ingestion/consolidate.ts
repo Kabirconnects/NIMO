@@ -15,8 +15,8 @@ import {
   insertRevision,
   recordAudit,
   listActiveMemories,
-  hashContent,
 } from "../storage/db.js";
+import { assessConflict, type ConflictAssessment } from "../graph/conflict.js";
 
 export interface ConsolidationResult {
   created: number;
@@ -26,16 +26,26 @@ export interface ConsolidationResult {
   memoryIds: string[];
 }
 
-/** Find an active memory that semantically duplicates this candidate. */
+/** Find an active memory that semantically duplicates this candidate.
+ *  Contradictory candidates are NEVER merged — they are kept as separate
+ *  memories and linked with a `contradicts` edge. */
 function findDuplicate(cand: MemoryCandidate, active: MemoryNode[]): MemoryNode | null {
   const candKey = cand.content.toLowerCase().replace(/\s+/g, " ").trim();
   for (const n of active) {
-    // Exact-ish match dominates.
     const nKey = n.content.toLowerCase().replace(/\s+/g, " ").trim();
-    if (nKey === candKey) return n;
-    if (nKey.length > 0 && candKey.length > 0 && (nKey.includes(candKey) || candKey.includes(nKey)) && nKey.length >= 12) return n;
+    const exactish =
+      nKey === candKey ||
+      (nKey.length >= 12 &&
+        candKey.length >= 12 &&
+        (nKey.includes(candKey) || candKey.includes(nKey)));
+    if (!exactish) continue;
+    const assessment = assessConflict(n, cand);
+    if (assessment.kind === "duplicate" || assessment.kind === "compatible") {
+      return n;
+    }
   }
-  // Keyword overlap fallback: same type, >=40% keyword overlap, long content.
+  // Keyword overlap fallback: same type, high overlap, but only when the
+  // conflict classifier says the pair is actually the same belief.
   const keySet = new Set(cand.keywords);
   let best: MemoryNode | null = null;
   let bestRatio = 0;
@@ -46,7 +56,11 @@ function findDuplicate(cand: MemoryCandidate, active: MemoryNode[]): MemoryNode 
     if (union.size === 0) continue;
     const inter = [...keySet].filter((k) => n.keywords.includes(k)).length;
     const ratio = inter / union.size;
-    if (ratio > bestRatio && ratio >= 0.4) { bestRatio = ratio; best = n; }
+    if (ratio <= bestRatio || ratio < 0.4) continue;
+    const assessment = assessConflict(n, cand);
+    if (assessment.kind !== "duplicate" && assessment.kind !== "compatible") continue;
+    bestRatio = ratio;
+    best = n;
   }
   return best;
 }
@@ -72,12 +86,13 @@ export function consolidate(
 
     const dup = findDuplicate(cand, active);
     if (dup) {
-      // Merge: append evidence, bump confidence, record revision.
+      // Merge: append evidence, union keywords. Confidence is deliberately
+      // NOT increased — repeating the same belief is not new evidence.
       const mergedEvidence = [...dup.evidence, evidence];
       updateMemory(dup.id, ownerId, {
         evidence: mergedEvidence,
-        confidence: Math.min(1, Math.max(dup.confidence, cand.confidence)),
-        importance: Math.min(1, Math.max(dup.importance, cand.importance)),
+        confidence: dup.confidence,
+        importance: Math.max(dup.importance, cand.importance),
         keywords: [...new Set([...dup.keywords, ...cand.keywords])],
         concepts: [...new Set([...dup.concepts, ...cand.concepts])],
       });
@@ -124,9 +139,40 @@ export function consolidate(
     });
   }
 
-  // Associate: link new neurons to related existing ones by keyword overlap.
+  // Associate: contradictions become explicit `contradicts` edges; otherwise
+  // link new neurons to related existing ones by keyword overlap.
   for (const node of createdNodes) {
     const candidatesForLink = active.filter((a) => a.id !== node.id && a.status === "active");
+
+    let conflictWith: { other: MemoryNode; assessment: ConflictAssessment } | null = null;
+    for (const other of candidatesForLink) {
+      const assessment = assessConflict(other, node);
+      if (assessment.kind !== "contradiction" && assessment.kind !== "correction") continue;
+      if (!conflictWith || assessment.contradictionScore > conflictWith.assessment.contradictionScore) {
+        conflictWith = { other, assessment };
+      }
+    }
+    if (conflictWith) {
+      insertEdge({
+        ownerId,
+        fromMemoryId: node.id,
+        toMemoryId: conflictWith.other.id,
+        relation: "contradicts",
+        confidence: conflictWith.assessment.contradictionScore,
+        weight: conflictWith.assessment.contradictionScore,
+        evidenceIds: [experienceId],
+      });
+      result.linked++;
+      recordAudit({
+        ownerId,
+        actor: "agent",
+        action: "link",
+        targetId: node.id,
+        reason: `contradicts ${conflictWith.other.id}: ${conflictWith.assessment.reason}`,
+      });
+      continue;
+    }
+
     let bestLink: MemoryNode | null = null;
     let bestScore = 0;
     for (const other of candidatesForLink) {

@@ -19,6 +19,9 @@ export interface IngestExperienceInput {
   messageId?: string;
   content: string;
   type: ExperienceType;
+  /** Who produced the text. Assistant/system output is preserved as an
+   *  experience but never mined for user facts. */
+  role?: "user" | "assistant" | "tool" | "system" | "document";
   occurredAt?: Date;
 }
 
@@ -47,6 +50,30 @@ export interface IngestionResult {
   memoryIds: string[];
 }
 
+// ---- bulk forgetting (preview by default) ----
+
+export interface ForgetMatch {
+  id: string;
+  type: MemoryType;
+  content: string;
+}
+
+export interface ForgetByQueryResult {
+  query: string;
+  /** True when this call only previewed; false when it deleted. */
+  preview: boolean;
+  matches: ForgetMatch[];
+  deleted: number;
+  /** True when more direct matches existed than the preview limit. */
+  truncated: boolean;
+}
+
+export interface ForgetByQueryOptions {
+  /** Must be explicitly true to delete. Anything else previews. */
+  confirm?: boolean;
+  limit?: number;
+}
+
 // ---- recall (hybrid retrieval) ----
 
 export interface RecallInput {
@@ -68,7 +95,15 @@ export interface RetrievedMemory {
 
 export interface RecallResult {
   memories: RetrievedMemory[];
+  /** Number of candidates actually scored (after owner/status/type filters). */
   totalCandidates: number;
+  /** Total active memories for the owner before any scan cap. */
+  totalActive?: number;
+  scannedCandidates?: number;
+  /** True when the active pool exceeded the scan cap. Never silently hidden. */
+  poolTruncated?: boolean;
+  /** True when more than `limit` results were available before slicing. */
+  resultsTruncated?: boolean;
   queryConcepts: string[];
   retrievalTimeMs: number;
 }
@@ -94,7 +129,11 @@ export interface MemoryService {
   ): MemoryNode;
 
   forget(memoryId: string, ownerId: string): void;
-  forgetByQuery(ownerId: string, query: string): number;
+  forgetByQuery(
+    ownerId: string,
+    query: string,
+    options?: ForgetByQueryOptions,
+  ): ForgetByQueryResult;
 
   linkMemories(
     fromMemoryId: string,

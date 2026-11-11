@@ -6,4 +6,10 @@ export const chatSchema = z.object({
   mode: z.enum(["Chat", "Plan", "Auto"]).optional(),
   modelId: z.enum(MODEL_IDS).optional(),
   effort: z.enum(EFFORT_LEVELS).optional(),
+  /**
+   * Set by the human/client only after an explicit destructive-operation
+   * confirmation prompt. The model cannot set this. It never grants access
+   * by itself — it only unblocks delete tools in Auto mode.
+   */
+  confirmDestructive: z.boolean().optional(),
 });

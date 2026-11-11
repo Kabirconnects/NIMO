@@ -78,7 +78,9 @@ export interface MemoryNode {
   retentionClass: RetentionClass;
   /** Graph centrality: number of edges (in + out). Drives dynamic base strength. */
   graphDegree: number;
-  /** Precomputed Personalized PageRank (recomputed periodically by Dreamer). */
+  /** Legacy centrality field. Ranking no longer consumes it: the old PageRank
+   *  term was permanently zero and has been removed from the score. Kept for
+   *  schema compatibility; not a promised capability. */
   pageRank: number;
 
   evidence: MemoryEvidence[];
@@ -92,6 +94,10 @@ export interface MemoryNode {
 
   supersedes?: string[];
   supersededBy?: string;
+
+  /** Persisted deterministic embedding (hashed n-gram vector). Optional for
+   *  legacy rows; recomputed lazily by retrieval. Never trusted as provenance. */
+  embedding?: number[];
 }
 
 /** A raw, LLM-produced memory before validation/consolidation. */

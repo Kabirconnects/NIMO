@@ -96,6 +96,9 @@ const MEMORY_QS = [
   { axis: "memory", id: "m8", query: "Who is the president of France?", expect: [] },
   { axis: "memory", id: "m9", query: "What is my name again?", expect: ["Himanshu Arodia"], absent: ["I do not have"] },
   { axis: "memory", id: "m10", query: "name", expect: ["Himanshu Arodia"], absent: ["I do not have"] },
+  // Paraphrases — same answer, different surface words.
+  { axis: "memory", id: "m11", query: "Which programming language do I use?", expect: ["TypeScript"] },
+  { axis: "memory", id: "m12", query: "What is the project called?", expect: ["Nimo"] },
 ];
 
 const RESEARCH_QS = [

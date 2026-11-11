@@ -15,7 +15,7 @@
 import type { RecallInput, RecallResult } from "../domain/service.types.js";
 import { recall } from "../retrieval/search.js";
 import { embedText, cosSim } from "../retrieval/embed.js";
-import { listActiveMemories } from "../storage/db.js";
+import { listActiveMemoriesByImportance } from "../storage/db.js";
 import { isRetrievable } from "../governance/policy.js";
 
 export interface BenchmarkQuestion {
@@ -37,6 +37,10 @@ export interface BenchmarkResult {
   latencyMs: number;
   faithfulness: number;   // fraction with evidence present (0-1)
   totalRetrieved: number;
+  /** Retrieved items that should not have been returned (negative/no-answer). */
+  falsePositives: number;
+  /** True for questions where the correct answer is "nothing". */
+  noAnswer: boolean;
 }
 
 export interface BenchmarkSummary {
@@ -47,23 +51,30 @@ export interface BenchmarkSummary {
   meanLatencyMs: number;
   meanFaithfulness: number;
   totalQuestions: number;
+  /** Accuracy on questions whose correct answer is "no memory exists". */
+  noAnswerAccuracy: number;
+  noAnswerQuestions: number;
   perCategory: Record<string, { recall: number; precision: number; mrr: number; count: number }>;
 }
 
 /** Build vector-only recall (embedding cosine only) for baseline comparison. */
 function recallVectorOnly(ownerId: string, query: string, limit: number): { ids: string[]; scores: Map<string, number> } {
-  const actives = listActiveMemories(ownerId, { limit: 200 });
+  // Same candidate pool ordering as production recall so the comparison is
+  // about retrieval signals, not about who scanned more rows.
+  const actives = listActiveMemoriesByImportance(ownerId, 5000);
   const queryEmb = embedText(query);
   const scored: { id: string; score: number }[] = [];
 
   for (const node of actives) {
     if (!isRetrievable(node, ownerId)) continue;
-    const emb = embedText([node.content, node.summary, ...node.keywords].join(" "));
+    const emb = node.embedding && node.embedding.length > 0
+      ? node.embedding
+      : embedText([node.content, node.summary, ...node.keywords].join(" "));
     const score = cosSim(queryEmb, emb);
     if (score > 0.05) scored.push({ id: node.id, score });
   }
 
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
   return {
     ids: scored.slice(0, limit).map((s) => s.id),
     scores: new Map(scored.map((s) => [s.id, s.score])),
@@ -93,12 +104,31 @@ function computeMetrics(
   retrievedIds: string[],
   expectedIds: string[],
   absentIds: string[] | undefined,
-  latencyMs: number,
   evidencePresent: boolean[],
-): { recallAtK: number; precisionAtK: number; mrr: number; faithfulness: number } {
+): { recallAtK: number; precisionAtK: number; mrr: number; faithfulness: number; falsePositives: number; noAnswer: boolean } {
+  const faithfulness = evidencePresent.length > 0
+    ? evidencePresent.filter(Boolean).length / evidencePresent.length
+    : 0;
+
+  const leaked = absentIds?.filter((id) => retrievedIds.includes(id)) ?? [];
+
+  // No-answer question (negative corpus): the correct response is to return
+  // nothing. Every retrieved memory is a false positive; an empty result is a
+  // pass. Older code auto-passed empty `expectedMemoryIds`, which made a query
+  // that failed to parse look perfect.
   if (expectedIds.length === 0) {
-    return { recallAtK: 1, precisionAtK: 1, mrr: 1, faithfulness: 1 };
+    const falsePositives = retrievedIds.length + leaked.length;
+    const clean = falsePositives === 0;
+    return {
+      recallAtK: clean ? 1 : 0,
+      precisionAtK: clean ? 1 : 0,
+      mrr: clean ? 1 : 0,
+      faithfulness: clean ? 1 : 0,
+      falsePositives,
+      noAnswer: true,
+    };
   }
+
   const found = expectedIds.filter((id) => retrievedIds.includes(id));
   const recallAtK = found.length / expectedIds.length;
   const precisionAtK = retrievedIds.length > 0
@@ -113,19 +143,19 @@ function computeMetrics(
     }
   }
 
-  const faithfulness = evidencePresent.length > 0
-    ? evidencePresent.filter(Boolean).length / evidencePresent.length
-    : 0;
-
   // Penalty for absent ids appearing (negative/forgetting/isolation tests)
-  if (absentIds?.length) {
-    const leaked = absentIds.filter((id) => retrievedIds.includes(id));
-    if (leaked.length > 0) {
-      return { recallAtK: 0, precisionAtK: 0, mrr: 0, faithfulness: 0 };
-    }
+  if (leaked.length > 0) {
+    return {
+      recallAtK: 0,
+      precisionAtK: 0,
+      mrr: 0,
+      faithfulness: 0,
+      falsePositives: leaked.length,
+      noAnswer: false,
+    };
   }
 
-  return { recallAtK, precisionAtK, mrr, faithfulness };
+  return { recallAtK, precisionAtK, mrr, faithfulness, falsePositives: 0, noAnswer: false };
 }
 
 /**
@@ -160,7 +190,7 @@ export function runBenchmark(
         }
       }
 
-      const metrics = computeMetrics(ids, q.expectedMemoryIds, q.expectedAbsentIds, latencyMs, evidencePresent);
+      const metrics = computeMetrics(ids, q.expectedMemoryIds, q.expectedAbsentIds, evidencePresent);
 
       allResults.push({
         questionId: q.id,
@@ -173,6 +203,8 @@ export function runBenchmark(
         latencyMs,
         faithfulness: metrics.faithfulness,
         totalRetrieved: ids.length,
+        falsePositives: metrics.falsePositives,
+        noAnswer: metrics.noAnswer,
       });
     }
   }
@@ -203,6 +235,7 @@ export function runBenchmark(
       };
     }
 
+    const noAnswer = configResults.filter((r) => r.noAnswer);
     summaries[configName] = {
       config: configName,
       meanRecall: configResults.reduce((s, r) => s + r.recallAtK, 0) / n,
@@ -211,6 +244,10 @@ export function runBenchmark(
       meanLatencyMs: configResults.reduce((s, r) => s + r.latencyMs, 0) / n,
       meanFaithfulness: configResults.reduce((s, r) => s + r.faithfulness, 0) / n,
       totalQuestions: n,
+      noAnswerAccuracy: noAnswer.length > 0
+        ? noAnswer.filter((r) => r.falsePositives === 0).length / noAnswer.length
+        : 0,
+      noAnswerQuestions: noAnswer.length,
       perCategory,
     };
   }
@@ -231,6 +268,7 @@ export function formatBenchmarkReport(summaries: Record<string, BenchmarkSummary
     lines.push(`Config: ${config}`);
     lines.push(`  Recall@${"K"}: ${(summary.meanRecall * 100).toFixed(1)}% | Precision: ${(summary.meanPrecision * 100).toFixed(1)}% | MRR: ${summary.meanMRR.toFixed(3)}`);
     lines.push(`  Latency: ${summary.meanLatencyMs.toFixed(1)}ms avg | Faithfulness: ${(summary.meanFaithfulness * 100).toFixed(1)}%`);
+    lines.push(`  No-answer accuracy: ${(summary.noAnswerAccuracy * 100).toFixed(1)}% (${summary.noAnswerQuestions} negative questions, false positives count as failures)`);
     lines.push(`  Questions: ${summary.totalQuestions}`);
     lines.push("");
     lines.push("  Per category:");
@@ -252,9 +290,15 @@ export function formatBenchmarkReport(summaries: Record<string, BenchmarkSummary
     lines.push("");
     const improvement = ((g.meanRecall - v.meanRecall) / Math.max(0.01, v.meanRecall)) * 100;
     lines.push(`Graph improvement over vector-only: ${improvement.toFixed(1)}%`);
-    if (improvement > 10) lines.push("✅ Graph complexity justified by retrieval improvement.");
-    else lines.push("⚠️  Graph improvement < 10% — consider whether graph expansion is worth latency for this corpus.");
+    if (improvement > 10) lines.push("Graph retrieval improves recall on this corpus.");
+    else lines.push("Graph improvement < 10% on this corpus — do not claim a general gain from graph expansion.");
   }
+
+  lines.push("");
+  lines.push("Limitations: synthetic corpus; questions were written alongside the");
+  lines.push("system, not blind. Scores measure retrieval on 15 memories and 15");
+  lines.push("questions, not research-grade generalization. Negative questions are");
+  lines.push("scored by false positives, not by empty-expect auto-pass.");
 
   return lines.join("\n");
 }

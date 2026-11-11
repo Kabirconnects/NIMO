@@ -1,24 +1,22 @@
 // retrieval/rank.ts
-// Multi-factor memory strength model (A-MEM 2025 + Ebbinghaus + HippoRAG).
-//
-// The core formula:
+// Multi-factor memory strength model (A-MEM 2025 + Ebbinghaus).
 //
 //   base_strength(v) = importance(v) × (1 + log(1 + degree(v)) / log(1 + max_degree))
-//   retention_mult   = stable: 1.0 | volatile: 1/(1+age/τ) | ephemeral: 0.3/(1+age/τ)
-//   final_score      = 0.35 × base_strength × retention_mult
-//                    + 0.30 × PageRank(v)
-//                    + 0.20 × relevance(v,q)
-//                    + 0.15 × recency(v)
+//   base_norm(v)     = min(1, base_strength(v) / 2)
+//   effective_recency= stable: 1 | volatile: recency | ephemeral: 0.3 × recency
+//   final_score      = 0.35 × relevance
+//                    + 0.40 × base_norm
+//                    + 0.15 × effective_recency
+//                    + 0.10 × confidence
 //
-// Research basis:
-//   - A-MEM: dynamic importance from graph centrality (degree)
-//   - HippoRAG: Personalized PageRank seeded by query entities
-//   - Ebbinghaus: forgetting curve for volatile memories
-//   - AgeMem: retention class (stable/volatile/ephemeral)
+// The old formula reserved 0.30 for PageRank, but PageRank was never computed
+// in production — the term was permanently zero and silently diluted every
+// real signal. It has been removed and the remaining weights renormalised.
+// Graph centrality still contributes through `base_strength` (degree), and
+// stability contributes exactly once through `effective_recency`.
 //
-// Recency is a tiebreaker (weight 0.15), not the king. Importance + connectedness
-// dominate — that is why a 5-month-old name fact (degree 4, stable) beats a
-// 2-second-old denial (degree 0, ephemeral).
+// Recency is a tiebreaker, not the king. Importance + connectedness dominate —
+// a 5-month-old stable identity fact beats a fresh ephemeral observation.
 
 import type { RetrievedMemory } from "../domain/service.types.js";
 import type { MemoryNode } from "../domain/memory.types.js";
@@ -49,49 +47,55 @@ export function ageingStrength(memory: RetrievedMemory["memory"], nowMs: number 
 }
 
 /**
+ * Single, non-double-counted retention effect used by the final score.
+ * Stable memories always read as fully recent; ephemeral ones fade fast.
+ */
+export function effectiveRecency(memory: MemoryNode, nowMs: number = Date.now()): number {
+  if (memory.retentionClass === "stable") return 1.0;
+  const rec = recencyScore(memory, nowMs);
+  return memory.retentionClass === "ephemeral" ? rec * 0.3 : rec;
+}
+
+/**
  * Dynamic base strength from importance + graph centrality (A-MEM Eq. 3).
- * Memories connected to many others get boosted — they are hubs, therefore important.
+ * Memories connected to many others get boosted — they are hubs, therefore
+ * important.
  */
 export function baseStrength(memory: MemoryNode, maxDegree = 50): number {
   const degreeBoost = 1 + Math.log(1 + memory.graphDegree) / Math.log(1 + Math.max(2, maxDegree));
   return memory.importance * degreeBoost;
 }
 
+/** Normalised 0..1 base strength so weights are comparable. */
+export function normalisedBase(memory: MemoryNode, maxDegree = 50): number {
+  return Math.min(1, baseStrength(memory, maxDegree) / 2);
+}
+
 /**
  * Compute the full multi-factor score for a memory.
- * Returns a score 0..~2.0 (higher = more important for this query).
+ * Returns a score 0..1 (higher = more important for this query).
  */
 export function computeFinalScore(
   memory: MemoryNode,
   relevance: number,
   maxDegree = 50,
 ): number {
-  const base = baseStrength(memory, maxDegree);
-  // Direct retention calc (avoid ageingStrength's RetrievedMemory wrapper)
-  let retention: number;
-  if (memory.retentionClass === "stable") {
-    retention = 1.0;
-  } else {
-    const last = memory.lastAccessedAt?.getTime() ?? memory.updatedAt?.getTime?.() ?? Date.now();
-    const ageMs = Math.max(0, Date.now() - last);
-    const halfLife = (30 * 24 * 60 * 60 * 1000) * (1 + (memory.importance ?? 0.5));
-    const decay = 1 / (1 + ageMs / halfLife);
-    retention = memory.retentionClass === "ephemeral" ? decay * 0.3 : decay;
-  }
-  const rec = recencyScore(memory);
-  const pr = memory.pageRank ?? 0; // precomputed by Dreamer; 0 if not computed yet
+  const base = normalisedBase(memory, maxDegree);
+  const rec = effectiveRecency(memory);
+  const confidence = Math.min(1, Math.max(0, memory.confidence ?? 0.5));
+  const rel = Math.min(1, Math.max(0, relevance));
 
   return (
-    0.35 * base * retention +
-    0.30 * pr +
-    0.20 * relevance +
-    0.15 * rec
+    0.35 * rel +
+    0.40 * base +
+    0.15 * rec +
+    0.10 * confidence
   );
 }
 
 /**
- * Sort by final score (desc), not by recency.
- * Recency is now a small component (0.15 weight) inside the score.
+ * Sort by final score (desc), not by recency. Ties break on updatedAt then id
+ * so retrieval is deterministic for identical data.
  */
 export function rankMemories(memories: RetrievedMemory[]): RetrievedMemory[] {
   return [...memories].sort((a, b) => {
@@ -99,6 +103,6 @@ export function rankMemories(memories: RetrievedMemory[]): RetrievedMemory[] {
     const ta = a.memory.updatedAt.getTime();
     const tb = b.memory.updatedAt.getTime();
     if (tb !== ta) return tb - ta;
-    return b.memory.importance - a.memory.importance;
+    return a.memory.id.localeCompare(b.memory.id);
   });
 }

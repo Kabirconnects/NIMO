@@ -1,110 +1,224 @@
 // retrieval/search.ts
 // Hybrid recall with RRF fusion: BM25 keyword, entity, embedding-cosine,
-// graph activation — 4 independent rankings fused by RRF (k=60).
-// The brain fires by *gist* (meaning), not exact words, and newest-first.
+// optional FTS5, and graph activation — independent rankings fused by RRF
+// (k=60). The brain fires by *gist* (meaning), not exact words.
+//
+// Retrieval is READ-ONLY and deterministic:
+//   - no edge/confidence/degree writes happen here
+//   - noise queries (no lexical hit and no gist match) return nothing
+//   - scan caps and result truncation are reported, never hidden
 
 import type { RecallInput, RecallResult, RetrievedMemory } from "../domain/service.types.js";
+import type { MemoryNode } from "../domain/memory.types.js";
 import { isRetrievable } from "../governance/policy.js";
-import { listActiveMemories, listActiveSkills } from "../storage/db.js";
+import {
+  countActiveMemories,
+  listActiveMemoriesByImportance,
+  listActiveSkills,
+  isFtsAvailable,
+  searchFts,
+} from "../storage/db.js";
 import { activate } from "./activate.js";
 import { bm25Score, embedText, cosSim } from "./embed.js";
 import { rrf } from "./rrf.js";
 import { computeFinalScore } from "./rank.js";
-import type { MemoryNode } from "../domain/memory.types.js";
+
+/** Hard scan cap. Reported through `poolTruncated` when exceeded. */
+const SCAN_CAP = 5000;
+/** Embedding cosine that counts as a genuine gist match (with token evidence). */
+const GIST_MIN = 0.22;
+/** Very strong cosine can stand alone, without any shared token. */
+const STRONG_GIST = 0.45;
+/** Never surface a result with essentially no relationship to the query. */
+const MIN_RELEVANCE = 0.08;
+
+const QUERY_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "by", "for",
+  "with", "from", "is", "are", "was", "were", "be", "been", "being", "it",
+  "this", "that", "these", "those", "i", "we", "you", "he", "she", "they",
+  "my", "our", "your", "their", "me", "us", "them", "do", "does", "did",
+  "have", "has", "had", "what", "which", "who", "whom", "when", "where",
+  "why", "how", "about", "please", "tell", "me", "can", "could", "would",
+  "should", "is", "there", "here",
+]);
+
+function queryTerms(query: string): string[] {
+  const all = query
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2);
+  const meaningful = all.filter((t) => !QUERY_STOPWORDS.has(t));
+  return [...new Set(meaningful.length > 0 ? meaningful : all)];
+}
+
+function nodeEmbedding(node: MemoryNode): number[] {
+  if (node.embedding && node.embedding.length > 0) return node.embedding;
+  return embedText([node.content, node.summary, ...node.keywords].join(" "));
+}
+
+/** Light stem so "neurons" matches "neuron" and "firing" matches "fire". */
+function stem(token: string): string {
+  if (token.length > 4 && token.endsWith("ing")) return token.slice(0, -3);
+  if (token.length > 4 && token.endsWith("ed")) return token.slice(0, -2);
+  if (token.length > 3 && token.endsWith("es")) return token.slice(0, -2);
+  if (token.length > 3 && token.endsWith("s")) return token.slice(0, -1);
+  return token;
+}
+
+function stemsOverlap(a: string, b: string): boolean {
+  if (a === b) return true;
+  const sa = stem(a);
+  const sb = stem(b);
+  if (sa === sb) return true;
+  const min = Math.min(sa.length, sb.length);
+  return min >= 3 && (sa.startsWith(sb) || sb.startsWith(sa));
+}
+
+/** At least one query content word shares a stem with the memory text. */
+function hasTokenEvidence(terms: string[], haystack: string): boolean {
+  const words = haystack.toLowerCase().match(/[a-z0-9_]+/g) ?? [];
+  for (const t of terms) {
+    for (const w of words) {
+      if (w.length >= 3 && stemsOverlap(t, w)) return true;
+    }
+  }
+  return false;
+}
 
 export function recall(input: RecallInput): RecallResult {
   const started = Date.now();
-  const limit = input.limit ?? 10;
+  const limit = Math.max(1, input.limit ?? 10);
 
-  // Human-like flowing pool: one continuous stream of active memories,
-  // no session buckets. Order is now by multi-factor score (A-MEM + HippoRAG),
-  // not pure recency. Load ALL active memories — the 200-limit was why
-  // important old memories were invisible.
-  const actives = listActiveMemories(input.ownerId, { limit: 5000 });
+  // Human-like flowing pool: one continuous stream of active memories, no
+  // session buckets. Load the most important memories first so an old stable
+  // fact cannot be cut off by a wall of fresh filler.
+  const totalActive = countActiveMemories(input.ownerId);
+  const actives = listActiveMemoriesByImportance(input.ownerId, SCAN_CAP);
+  const poolTruncated = totalActive > actives.length;
 
-  const terms = input.query
-    .toLowerCase()
-    .split(/\W+/)
-    .filter((t) => t.length >= 3);
+  const terms = queryTerms(input.query);
+
+  const empty = (): RecallResult => ({
+    memories: [],
+    totalCandidates: 0,
+    totalActive,
+    scannedCandidates: actives.length,
+    poolTruncated,
+    resultsTruncated: false,
+    queryConcepts: terms,
+    retrievalTimeMs: Date.now() - started,
+  });
+
+  if (terms.length === 0) return empty();
 
   const queryEmb = embedText(input.query);
   const byId = new Map(actives.map((a) => [a.id, a]));
-  const bm25Ids: string[] = [];
-  const entityIds: string[] = [];
-  const embedIds: string[] = [];
+
+  const bm25 = new Map<string, number>();
+  const cos = new Map<string, number>();
+  const entityMatches = new Set<string>();
+  const ftsIds = isFtsAvailable() ? searchFts(input.ownerId, input.query, 200) : [];
+  const ftsSet = new Set(ftsIds);
 
   for (const node of actives) {
     if (!isRetrievable(node, input.ownerId)) continue;
     if (input.memoryTypes?.length && !input.memoryTypes.includes(node.type)) continue;
 
     const haystack = [node.content, node.summary, ...node.concepts, ...node.keywords, ...node.tags].join(" ");
-    if (bm25Score(terms, haystack) > 0) bm25Ids.push(node.id);
-    if (node.entities.some((e) => terms.some((t) => e.name.toLowerCase().includes(t)))) entityIds.push(node.id);
-    const emb = embedText([node.content, node.summary, ...node.keywords].join(" "));
-    if (cosSim(queryEmb, emb) > 0.05) embedIds.push(node.id);
+    const bm = bm25Score(terms, haystack);
+    if (bm > 0) bm25.set(node.id, bm);
+
+    const entityNames = node.entities.map((e) => e.name.toLowerCase());
+    if (entityNames.some((n) => terms.some((t) => n.includes(t)))) {
+      entityMatches.add(node.id);
+    }
+
+    const c = cosSim(queryEmb, nodeEmbedding(node));
+    if (c > 0.02) cos.set(node.id, c);
   }
 
-  const rankWith = (ids: string[], scoreFn: (n: (typeof actives)[number]) => number) =>
-    ids
-      .map((id) => byId.get(id)!)
-      .filter(Boolean)
-      .sort((a, b) => scoreFn(b) - scoreFn(a) || b.updatedAt.getTime() - a.updatedAt.getTime())
-      .map((n) => n.id);
+  // Noise gate: a memory must have a lexical hit, an entity hit, an FTS hit,
+  // or a gist match backed by at least one shared content stem. A cosine
+  // alone above STRONG_GIST is also accepted. Nonsense queries therefore
+  // return nothing instead of a confidently-scored unrelated memory.
+  const candidateIds = new Set<string>();
+  for (const node of actives) {
+    if (input.memoryTypes?.length && !input.memoryTypes.includes(node.type)) continue;
+    const haystack = [node.content, node.summary, ...node.concepts, ...node.keywords, ...node.tags].join(" ");
+    const gist = cos.get(node.id) ?? 0;
+    const lexical =
+      (bm25.get(node.id) ?? 0) > 0 ||
+      entityMatches.has(node.id) ||
+      ftsSet.has(node.id);
+    const gistOk =
+      gist >= STRONG_GIST ||
+      (gist >= GIST_MIN && hasTokenEvidence(terms, haystack));
+    if (lexical || gistOk) candidateIds.add(node.id);
+  }
+  const candidateNodes = actives.filter((n) => candidateIds.has(n.id));
+  if (candidateNodes.length === 0) return empty();
 
-  const bm25Rank = rankWith(bm25Ids, (n) => bm25Score(terms, n.content + " " + n.summary));
-  const entityRank = rankWith(entityIds, () => 1);
-  const embedRank = rankWith(embedIds, (n) => cosSim(queryEmb, embedText(n.content + " " + n.summary)));
+  const sortedIds = (ids: string[], scoreOf: (id: string) => number) =>
+    [...ids].sort((a, b) => {
+      const d = scoreOf(b) - scoreOf(a);
+      if (d !== 0) return d;
+      const na = byId.get(a)!;
+      const nb = byId.get(b)!;
+      return nb.updatedAt.getTime() - na.updatedAt.getTime() || a.localeCompare(b);
+    });
 
-  const fusedIds = rrf([bm25Rank, entityRank, embedRank]);
-  // Diffusion threshold: embedding cosine > 0.15 counts as "gist" match so
-  // morphological/semantic relatives fire even without exact words.
-  const fusedSet = new Set(fusedIds.filter((id) => {
-    const n = byId.get(id)!;
-    const emb = embedText([n.content, n.summary, ...n.keywords].join(" "));
-    return cosSim(queryEmb, emb) > 0.15 || bm25Ids.includes(id);
-  }));
+  const bm25Rank = sortedIds([...bm25.keys()].filter((id) => candidateIds.has(id)), (id) => bm25.get(id) ?? 0);
+  const entityRank = sortedIds([...entityMatches].filter((id) => candidateIds.has(id)), () => 1);
+  const embedRank = sortedIds([...cos.keys()].filter((id) => candidateIds.has(id)), (id) => cos.get(id) ?? 0);
+  const ftsRank = ftsIds.filter((id) => byId.has(id) && candidateIds.has(id));
+  const fusedIds = rrf([bm25Rank, entityRank, embedRank, ftsRank].filter((l) => l.length > 0));
 
   const scored: RetrievedMemory[] = [];
-  for (const node of actives) {
-    if (!isRetrievable(node, input.ownerId)) continue;
-    if (input.memoryTypes?.length && !input.memoryTypes.includes(node.type)) continue;
-    if (!fusedSet.has(node.id)) continue;
+  for (const id of fusedIds) {
+    const node = byId.get(id);
+    if (!node || !isRetrievable(node, input.ownerId)) continue;
 
     const haystack = [node.content, node.summary, ...node.concepts, ...node.keywords, ...node.tags]
       .join(" ")
       .toLowerCase();
-
     let hits = 0;
     for (const t of terms) if (haystack.includes(t)) hits++;
-    const matchedBy: RetrievedMemory["matchedBy"] = ["keyword"];
-    const entityNames = node.entities.map((e) => e.name.toLowerCase());
-    if (entityNames.some((n) => terms.some((t) => n.includes(t)))) matchedBy.push("entity");
-    if (bm25Ids.includes(node.id)) matchedBy.push("keyword");
 
+    const bm = bm25.get(id) ?? 0;
+    const c = cos.get(id) ?? 0;
+    const coverage = hits / Math.max(1, terms.length);
+    const bmNorm = bm > 0 ? Math.min(1, bm / (bm + 1)) : 0;
     const relevance = Math.max(
-        hits / Math.max(1, terms.length),
-        bm25Score(terms, haystack) > 0 ? 0.3 : 0,
-        cosSim(queryEmb, embedText([node.content, node.summary].join(" "))) > 0.05 ? 0.2 : 0,
-      );
-    const finalScore = computeFinalScore(node, relevance);
+      coverage,
+      bmNorm,
+      c >= GIST_MIN ? c : 0,
+      entityMatches.has(id) ? 0.5 : 0,
+    );
+    if (relevance < MIN_RELEVANCE && !entityMatches.has(id)) continue;
+
+    const matchedBy: RetrievedMemory["matchedBy"] = [];
+    if (hits > 0 || bm > 0) matchedBy.push("keyword");
+    if (entityMatches.has(id)) matchedBy.push("entity");
+    if (c >= GIST_MIN) matchedBy.push("vector");
+    if (matchedBy.length === 0) matchedBy.push("keyword");
 
     scored.push({
       memory: node,
-      score: finalScore,
+      score: computeFinalScore(node, relevance),
       matchedBy,
       relatedMemoryIds: [],
       evidence: input.includeEvidence ? node.evidence : [],
     });
   }
+  if (scored.length === 0) return empty();
 
-  // Sort by multi-factor score (importance + graph centrality + PageRank + relevance + recency).
-  // Recency is now weight 0.15 in the score, not the primary sort key.
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     const tb = b.memory.updatedAt.getTime();
     const ta = a.memory.updatedAt.getTime();
     if (tb !== ta) return tb - ta;
-    return b.memory.importance - a.memory.importance;
+    return a.memory.id.localeCompare(b.memory.id);
   });
   const seeds = scored.slice(0, Math.max(limit, 10));
 
@@ -112,10 +226,7 @@ export function recall(input: RecallInput): RecallResult {
   // connected memories (even with zero keyword overlap) can surface.
   const expanded = activate(input.ownerId, seeds, input.maxGraphHops ?? 2);
 
-  // Skills silo fix: a skill ("fix-bug") is knowledge too — it must be
-  // recallable by the same query path as a fact. Without this, "How do I
-  // fix a failing test?" finds no skill even when one is active.
-  // Project active skills into the same ranked stream as memories.
+  // Skills are knowledge too — project active skills into the same stream.
   const skillProjections = projectSkills(input.ownerId, input.query, terms, byId);
   for (const proj of skillProjections) {
     if (!expanded.some((e) => e.memory.id === proj.memory.id)) {
@@ -123,18 +234,23 @@ export function recall(input: RecallInput): RecallResult {
     }
   }
 
-  // Final surface order: multi-factor score (not pure recency).
-  const ranked = [...expanded].sort((a, b) => {
+  const rankedAll = [...expanded].sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     const tb = b.memory.updatedAt.getTime();
     const ta = a.memory.updatedAt.getTime();
     if (tb !== ta) return tb - ta;
-    return b.memory.importance - a.memory.importance;
-  }).slice(0, limit);
+    return a.memory.id.localeCompare(b.memory.id);
+  });
+  const resultsTruncated = rankedAll.length > limit;
+  const ranked = rankedAll.slice(0, limit);
 
   return {
     memories: ranked,
-    totalCandidates: actives.length + skillProjections.length,
+    totalCandidates: candidateNodes.length,
+    totalActive,
+    scannedCandidates: actives.length,
+    poolTruncated,
+    resultsTruncated,
     queryConcepts: terms,
     retrievalTimeMs: Date.now() - started,
   };
@@ -142,10 +258,7 @@ export function recall(input: RecallInput): RecallResult {
 
 /**
  * Project active skills that match the query into RetrievedMemory so a
- * single recall() call returns both facts and procedures. Scoring mirrors
- * loadSkills() + the multi-factor formula: hit rate × 0.6 + success rate
- * × 0.25 × ageFactor + confidence × 0.15, then blended with the existing
- * final-score scale so skills compete fairly with memories.
+ * single recall() call returns both facts and procedures.
  */
 function projectSkills(
   ownerId: string,
@@ -205,6 +318,6 @@ function projectSkills(
     });
   }
 
-  out.sort((a, b) => b.score - a.score);
+  out.sort((a, b) => b.score - a.score || a.memory.id.localeCompare(b.memory.id));
   return out.slice(0, 10);
 }

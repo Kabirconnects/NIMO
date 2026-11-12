@@ -57,7 +57,7 @@ export function getModeConfig(mode: AgentMode): ModeConfig {
           ...RESEARCH_TOOLS,
         ],
         allowWrite: true,
-        allowShell: false,
+        allowShell: true,
       };
   }
 }

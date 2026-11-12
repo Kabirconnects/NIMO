@@ -1,50 +1,168 @@
 import { tool, type Tool } from "ai";
 import { z } from "zod";
 
-import { resolveSafe, toRel, safeEnv, clip } from "../shared/workspace.js";
-import { spawn } from "node:child_process";
+import { resolveSafe, toRel, clip } from "../shared/workspace.js";
+import { assertCanRunShell } from "../shared/permissions.js";
+import { runProcess } from "../shared/process.js";
+
+import fsp from "node:fs/promises";
 import path from "node:path";
+
+const COMMANDS = [
+  "auto",
+  "bun test",
+  "bun run test",
+  "bunx tsc --noEmit",
+  "npm test",
+  "pnpm test",
+  "yarn test",
+  "vitest run",
+  "jest",
+  "npx tsc --noEmit",
+] as const;
+
+async function exists(file: string): Promise<boolean> {
+  try {
+    await fsp.access(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Detect the project's real test/typecheck command instead of guessing. */
+async function detectCommand(dir: string): Promise<{ command: string; reason: string }> {
+  const pkgPath = path.join(dir, "package.json");
+  if (await exists(pkgPath)) {
+    const pm = (await exists(path.join(dir, "pnpm-lock.yaml")))
+      ? "pnpm"
+      : (await exists(path.join(dir, "yarn.lock")))
+        ? "yarn"
+        : (await exists(path.join(dir, "bun.lock"))) ||
+            (await exists(path.join(dir, "bun.lockb")))
+          ? "bun"
+          : "npm";
+
+    try {
+      const pkg = JSON.parse(await fsp.readFile(pkgPath, "utf-8")) as {
+        scripts?: Record<string, string>;
+        packageManager?: string;
+      };
+      if (pkg.scripts?.test) {
+        return {
+          command: pm === "bun" ? "bun run test" : `${pm} test`,
+          reason: `package.json has a "test" script (${pm})`,
+        };
+      }
+    } catch {
+      /* malformed package.json - fall through */
+    }
+  }
+
+  if (await exists(path.join(dir, "tsconfig.json"))) {
+    return {
+      command: "bunx tsc --noEmit",
+      reason: "tsconfig.json found; typecheck instead of tests",
+    };
+  }
+
+  return { command: "bun test", reason: "no package.json test script or tsconfig; default bun test" };
+}
+
+interface Counts {
+  passed?: number;
+  failed?: number;
+}
+
+function parseCounts(output: string): Counts {
+  const counts: Counts = {};
+  const pass = output.match(/(\d+)\s+(?:pass(?:ed)?|tests?\s+passed)/i);
+  const fail = output.match(/(\d+)\s+(?:fail(?:ed)?|tests?\s+failed)/i);
+  if (pass) counts.passed = Number(pass[1]);
+  if (fail) counts.failed = Number(fail[1]);
+  return counts;
+}
+
+const FAILURE_LINE =
+  /(^|\s)(FAIL|✗|×|●|not ok|AssertionError|error TS\d+|Test failed|Expected:|Received:)/i;
+
+function extractFailures(output: string, limit = 25): string[] {
+  const seen = new Set<string>();
+  const failures: string[] = [];
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.length < 4) continue;
+    if (!FAILURE_LINE.test(line)) continue;
+    const clipped = line.slice(0, 300);
+    if (seen.has(clipped)) continue;
+    seen.add(clipped);
+    failures.push(clipped);
+    if (failures.length >= limit) break;
+  }
+  return failures;
+}
 
 export const runTestsTool: Tool = tool({
   description:
-    "Run the project's test command (bun test / npm test / tsc --noEmit) and return the tail of the output. " +
-    "Use after making a change to verify it works. Commands are allowlisted — no arbitrary shell.",
+    "Run the project's tests (or typecheck) and return a structured result: exit code, timing, " +
+    "pass/fail counts when detectable, extracted failure lines, and the output tail. " +
+    "command='auto' (default) detects the package manager, the package.json test script, or tsconfig. " +
+    "Use this after every code change to verify the work instead of claiming success. " +
+    "Runs through the same allowlisted, timeout-capped, env-scrubbed process sandbox as runCommand.",
 
   inputSchema: z.object({
-    command: z.enum(["bun test", "bunx tsc --noEmit", "npm test", "pnpm test", "vitest run"]).default("bun test")
-      .describe("Test command to run"),
-    timeoutMs: z.number().int().min(5_000).max(120_000).default(30_000),
-    cwd: z.string().default(".").describe("Working directory relative to workspace"),
+    command: z.enum(COMMANDS).default("auto")
+      .describe("Test command, or 'auto' to detect from the project"),
+    cwd: z.string().default(".").describe("Working directory relative to the workspace"),
+    timeoutMs: z.number().int().min(1_000).max(600_000).default(180_000)
+      .describe("Hard timeout in milliseconds"),
+    maxOutputBytes: z.number().int().min(1_000).max(1_000_000).default(60_000),
   }),
 
-  execute: async ({ command, timeoutMs, cwd }) => {
+  execute: async ({ command, cwd, timeoutMs, maxOutputBytes }) => {
     try {
+      assertCanRunShell();
       const dir = await resolveSafe(cwd);
-      const [bin, ...args] = command.split(/\s+/);
-      if (!["bun", "bunx", "npm", "pnpm", "npx", "node"].includes(bin as string)) {
-        throw new Error("Command not allowlisted");
-      }
-      const out = await new Promise<{ stdout: string; stderr: string; code: number }>((resolve, reject) => {
-        const child = spawn(bin as string, args as string[], {
-          cwd: dir,
-          env: safeEnv(),
-          timeout: timeoutMs,
-          shell: process.platform === "win32",
-        });
-        let stdout = "", stderr = "";
-        child.stdout?.on("data", (d) => { stdout += d; });
-        child.stderr?.on("data", (d) => { stderr += d; });
-        child.on("error", reject);
-        child.on("close", (code) => resolve({ stdout, stderr, code: code ?? 0 }));
+
+      const detected = command === "auto" ? await detectCommand(dir) : null;
+      const resolved = detected?.command ?? command;
+
+      const result = await runProcess({
+        command: resolved,
+        cwd: dir,
+        timeoutMs,
+        maxOutputBytes,
       });
+
+      const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      const counts = parseCounts(combined);
+      const failures = extractFailures(combined);
+
       return {
-        success: out.code === 0,
-        exitCode: out.code,
+        success: result.ok,
+        command: resolved,
+        detection: detected?.reason,
         cwd: toRel(dir),
-        tail: clip(out.stdout + (out.stderr ? "\n[stderr]\n" + out.stderr : ""), 12_000),
+        exitCode: result.exitCode,
+        signal: result.signal,
+        timedOut: result.timedOut,
+        truncated: result.truncated,
+        durationMs: result.durationMs,
+        counts,
+        failures,
+        stdout: clip(result.stdout, 20_000),
+        stderr: clip(result.stderr, 20_000),
+        hint: result.ok
+          ? undefined
+          : failures.length > 0
+            ? "Fix the extracted failures above, then re-run runTests."
+            : "No familiar failure lines were found; inspect the output tail.",
       };
     } catch (error) {
-      return { success: false as const, error: error instanceof Error ? error.message : String(error) };
+      return {
+        success: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   },
 });

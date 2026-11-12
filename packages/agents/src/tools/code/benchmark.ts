@@ -1,55 +1,119 @@
 import { tool, type Tool } from "ai";
 import { z } from "zod";
 
-import { resolveSafe, toRel, safeEnv, clip } from "../shared/workspace.js";
-import { spawn } from "node:child_process";
+import { resolveSafe, toRel, tail } from "../shared/workspace.js";
+import { assertCanRunShell } from "../shared/permissions.js";
+import { runProcess } from "../shared/process.js";
+
+interface Stats {
+  meanMs: number;
+  medianMs: number;
+  minMs: number;
+  maxMs: number;
+  p95Ms: number;
+  stdDevMs: number;
+  totalMs: number;
+}
+
+function stats(values: number[]): Stats {
+  const sorted = [...values].sort((a, b) => a - b);
+  const sum = sorted.reduce((a, b) => a + b, 0);
+  const mean = sum / sorted.length;
+  const middle = Math.floor(sorted.length / 2);
+  const median =
+    sorted.length % 2 === 0
+      ? (sorted[middle - 1]! + sorted[middle]!) / 2
+      : sorted[middle]!;
+  const variance =
+    sorted.reduce((acc, value) => acc + (value - mean) ** 2, 0) / sorted.length;
+  const p95Index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(0.95 * sorted.length) - 1));
+
+  return {
+    meanMs: Math.round(mean),
+    medianMs: Math.round(median),
+    minMs: Math.min(...sorted),
+    maxMs: Math.max(...sorted),
+    p95Ms: sorted[p95Index]!,
+    stdDevMs: Math.round(Math.sqrt(variance)),
+    totalMs: Math.round(sum),
+  };
+}
 
 export const benchmarkTool: Tool = tool({
   description:
-    "Run a command N times, time each run, and return stats (mean/min/max). " +
-    "Use for research: measure latency, throughput, or test duration, then save the result into memory as an experience.",
+    "Time a command over several runs and return statistics (mean, median, min, max, p95, stddev). " +
+    "Useful for measuring build/test latency or comparing implementations. " +
+    "Supports warmup runs so the first cold run does not skew the result. " +
+    "Runs through the allowlisted process sandbox; the command should be non-interactive. " +
+    "Requires Auto mode or AGENT_ALLOW_SHELL=true.",
 
   inputSchema: z.object({
-    command: z.string().min(1).max(200).describe("Command to measure, e.g. 'bun test'"),
-    runs: z.number().int().min(1).max(20).default(3),
-    timeoutMs: z.number().int().min(5_000).max(120_000).default(30_000),
-    cwd: z.string().default("."),
+    command: z.string().min(1).max(4_000).optional()
+      .describe("Command to measure, e.g. 'pnpm build' or 'bun test'"),
+    argv: z.array(z.string().min(1).max(1_000)).min(1).max(100).optional()
+      .describe("Explicit argument list (preferred when arguments contain spaces)"),
+    runs: z.number().int().min(1).max(20).default(3)
+      .describe("Measured runs"),
+    warmup: z.number().int().min(0).max(5).default(1)
+      .describe("Unmeasured warmup runs"),
+    cwd: z.string().default(".").describe("Working directory relative to the workspace"),
+    timeoutMs: z.number().int().min(1_000).max(600_000).default(180_000)
+      .describe("Timeout per run"),
   }),
 
-  execute: async ({ command, runs, timeoutMs, cwd }) => {
+  execute: async ({ command, argv, runs, warmup, cwd, timeoutMs }) => {
     try {
+      assertCanRunShell();
+      if (!command && !argv) throw new Error("Provide either command or argv");
       const dir = await resolveSafe(cwd);
-      const [bin, ...args] = command.split(/\s+/);
-      if (!["bun", "bunx", "npm", "pnpm", "node", "npx"].includes(bin as string)) {
-        throw new Error("Command not allowlisted for benchmark");
-      }
-      const times: number[] = [];
-      let lastOut = "";
-      for (let i = 0; i < runs; i++) {
-        const started = Date.now();
-        const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-          const c = spawn(bin as string, args as string[], { cwd: dir, env: safeEnv(), timeout: timeoutMs, shell: process.platform === "win32" });
-          let so = "", se = "";
-          c.stdout?.on("data", (d) => { so += d; });
-          c.stderr?.on("data", (d) => { se += d; });
-          c.on("error", reject);
-          c.on("close", () => resolve({ stdout: so, stderr: se }));
+
+      const results: { durationMs: number; exitCode: number | null; ok: boolean; timedOut: boolean }[] = [];
+      let lastOutput = "";
+
+      for (let i = 0; i < warmup + runs; i++) {
+        const result = await runProcess({
+          command: argv ? undefined : command,
+          argv,
+          cwd: dir,
+          timeoutMs,
+          maxOutputBytes: 20_000,
         });
-        times.push(Date.now() - started);
-        lastOut = stdout + stderr;
+
+        lastOutput = [result.stdout, result.stderr].filter(Boolean).join("\n");
+
+        if (i >= warmup) {
+          results.push({
+            durationMs: result.durationMs,
+            exitCode: result.exitCode,
+            ok: result.ok,
+            timedOut: result.timedOut,
+          });
+        }
       }
-      const mean = times.reduce((a, b) => a + b, 0) / times.length;
+
+      const durations = results.map((r) => r.durationMs);
+      const failed = results.filter((r) => !r.ok).length;
+
       return {
-        success: true as const,
-        command,
+        success: failed === 0,
+        command: argv ? argv.join(" ") : command,
+        cwd: toRel(dir),
         runs,
-        meanMs: Math.round(mean),
-        minMs: Math.min(...times),
-        maxMs: Math.max(...times),
-        sample: clip(lastOut, 2_000),
+        warmup,
+        failedRuns: failed,
+        ...stats(durations),
+        samples: results,
+        outputTail: tail(lastOutput, 4_000),
+        hint:
+          failed > 0
+            ? "Some runs failed; timing comparisons are only meaningful when every run exits 0."
+            : undefined,
       };
     } catch (error) {
-      return { success: false as const, error: error instanceof Error ? error.message : String(error) };
+      return {
+        success: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   },
 });

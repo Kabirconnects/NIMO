@@ -1,68 +1,175 @@
 import { tool, type Tool } from "ai";
 import { z } from "zod";
 
-import { resolveSafe, toRel, isSecret, assertWritable, ALLOW_WRITE, walkFiles } from "../shared/workspace.js";
+import {
+  resolveSafe,
+  toRel,
+  assertWritable,
+  readTextFile,
+  atomicWrite,
+  walkFiles,
+} from "../shared/workspace.js";
+import { assertCanWrite } from "../shared/permissions.js";
+import { isGlobPattern, matchesGlob } from "../shared/glob.js";
 
-import fsp from "node:fs/promises";
+const asPatterns = (value?: string | string[]): string[] | undefined =>
+  value === undefined ? undefined : Array.isArray(value) ? value : [value];
+
+function filterMatches(rel: string, patterns?: string[]): boolean {
+  if (!patterns || patterns.length === 0) return true;
+  return patterns.some((p) =>
+    isGlobPattern(p) ? matchesGlob(rel, p) : rel.toLowerCase().endsWith(p.toLowerCase()),
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function lineNumberAt(text: string, index: number): number {
+  let line = 1;
+  for (let i = 0; i < index; i++) if (text.charCodeAt(i) === 10) line++;
+  return line;
+}
+
+function lineAt(text: string, line: number): string {
+  return (text.split(/\r?\n/)[line - 1] ?? "").trim().slice(0, 240);
+}
 
 export const refactorTool: Tool = tool({
   description:
-    "Bulk rename/replace across the workspace: find all matches of a pattern and replace them in every file. " +
-    "Dry-run first by default — set apply=true to write. Uses the same sandbox/proven guards as editFile.",
+    "Bulk find-and-replace across workspace files - rename a symbol, update an import path, " +
+    "or migrate an API. Dry-run by default: it reports every file, replacement count, and a preview " +
+    "line, and only writes when apply=true. " +
+    "Uses glob include/exclude filters, skips binary/secret/generated folders, and writes atomically. " +
+    "Prefer editFile for a single targeted change; use this for genuine cross-file refactors. " +
+    "Requires write permission when apply=true.",
 
   inputSchema: z.object({
-    pattern: z.string().min(1).describe("Plain text or regex to find"),
-    regex: z.boolean().default(false).describe("If true, pattern is regex"),
-    replacement: z.string().describe("Replacement text (regex capture refs like $1 allowed when regex=true)"),
-    include: z.string().optional().describe("File extension filter, e.g. '.ts'"),
-    apply: z.boolean().default(false).describe("If false (default), dry-run only and report matches. If true, write the changes."),
-    maxFiles: z.number().int().min(1).max(100).default(30),
+    pattern: z.string().min(1).max(2_000).describe("Text or regular expression to find"),
+    replacement: z.string().max(200_000).describe("Replacement text (regex $1 groups allowed)"),
+    regex: z.boolean().default(false).describe("Interpret pattern as a regular expression"),
+    caseSensitive: z.boolean().default(true)
+      .describe("Match case exactly (default true, safest for code identifiers)"),
+    include: z.union([z.string(), z.array(z.string())]).optional()
+      .describe("Glob(s) or suffix(es) to include, e.g. '**/*.ts' or ['.ts', '.tsx']"),
+    exclude: z.union([z.string(), z.array(z.string())]).optional()
+      .describe("Glob(s) or suffix(es) to skip, e.g. '**/*.test.ts'"),
+    path: z.string().default(".").describe("Directory to refactor, relative to the workspace"),
+    apply: z.boolean().default(false).describe("Write changes (default false = dry run)"),
+    maxFiles: z.number().int().min(1).max(500).default(100)
+      .describe("Maximum files to change"),
+    maxFileBytes: z.number().int().min(1_000).max(5_000_000).default(1_000_000)
+      .describe("Skip files larger than this"),
   }),
 
-  execute: async ({ pattern, regex, replacement, include, apply, maxFiles }) => {
+  execute: async ({
+    pattern,
+    replacement,
+    regex,
+    caseSensitive,
+    include,
+    exclude,
+    path: inputPath,
+    apply,
+    maxFiles,
+    maxFileBytes,
+  }) => {
     try {
-      const root = await resolveSafe(".");
-      const re = regex ? new RegExp(pattern, "g") : null;
-      const needle = pattern.toLowerCase();
+      if (apply) assertCanWrite("refactor");
 
-      const perFile: { path: string; matches: number }[] = [];
-      let totalMatches = 0;
+      const root = await resolveSafe(inputPath);
+      const includePatterns = asPatterns(include);
+      const excludePatterns = asPatterns(exclude);
+      const flags = `g${caseSensitive ? "" : "i"}`;
+      const matcher = new RegExp(regex ? pattern : escapeRegExp(pattern), flags);
 
-      for await (const full of walkFiles(root)) {
-        if (isSecret(full)) continue;
-        if (include && !full.toLowerCase().endsWith(include.toLowerCase())) continue;
+      const perFile: {
+        path: string;
+        replacements: number;
+        preview: { line: number; before: string; after: string };
+      }[] = [];
 
-        let text: string;
-        try { text = await fsp.readFile(full, "utf-8"); } catch { continue; }
+      let totalReplacements = 0;
+      let filesScanned = 0;
+      let truncated = false;
+      let skippedBinary = 0;
 
-        const matches = re
-          ? (text.match(re) ?? []).length
-          : text.toLowerCase().split(needle).length - 1;
+      for await (const full of walkFiles(root, 0, {
+        pattern: includePatterns,
+        maxFiles: 20_000,
+      })) {
+        const rel = toRel(full);
+        if (!filterMatches(rel, includePatterns)) continue;
+        if (excludePatterns && filterMatches(rel, excludePatterns)) continue;
 
-        if (matches === 0) continue;
-        perFile.push({ path: toRel(full), matches });
-        totalMatches += matches;
+        filesScanned++;
+        const file = await readTextFile(full, maxFileBytes);
+        if (file.binary) {
+          skippedBinary++;
+          continue;
+        }
+
+        matcher.lastIndex = 0;
+        const first = matcher.exec(file.text);
+        if (!first) continue;
+
+        matcher.lastIndex = 0;
+        let count = 0;
+        let hit: RegExpExecArray | null;
+        while ((hit = matcher.exec(file.text)) !== null) {
+          count++;
+          if (hit[0].length === 0) matcher.lastIndex++;
+          if (count >= 100_000) break;
+        }
+        if (count === 0) continue;
+
+        const line = lineNumberAt(file.text, first.index);
+        const before = lineAt(file.text, line);
+        const after = before.replace(
+          new RegExp(regex ? pattern : escapeRegExp(pattern), caseSensitive ? "" : "i"),
+          regex ? replacement : replacement.replace(/\$/g, "$$$$"),
+        );
+
+        perFile.push({ path: rel, replacements: count, preview: { line, before, after } });
+        totalReplacements += count;
 
         if (apply) {
           assertWritable(full);
-          if (ALLOW_WRITE) {
-            const updated = re ? text.replace(re, replacement) : text.split(pattern).join(replacement);
-            await fsp.writeFile(full, updated, "utf-8");
-          }
+          matcher.lastIndex = 0;
+          const updated = file.text.replace(
+            matcher,
+            regex ? replacement : replacement.replace(/\$/g, "$$$$"),
+          );
+          await atomicWrite(full, updated);
         }
-        if (perFile.length >= maxFiles) break;
+
+        if (perFile.length >= maxFiles) {
+          truncated = true;
+          break;
+        }
       }
 
       return {
         success: true as const,
         applied: apply,
         pattern,
-        totalMatches,
-        filesChanged: apply ? perFile.length : 0,
+        root: toRel(root),
+        filesScanned,
+        filesChanged: perFile.length,
+        totalReplacements,
+        skippedBinary,
+        truncated,
         perFile,
+        hint: apply
+          ? "Run runTests and gitStatus to verify the refactor."
+          : "Dry run only. Re-call with apply=true to write these changes.",
       };
     } catch (error) {
-      return { success: false as const, error: error instanceof Error ? error.message : String(error) };
+      return {
+        success: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   },
 });

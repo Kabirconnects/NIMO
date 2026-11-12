@@ -78,7 +78,7 @@ export function buildMemoryContext(
     lines.push("No prior activity recorded — do not claim any previous turn, intro, or name that is not in this block.");
   } else {
     for (const m of recent) {
-      lines.push(`- [${m.type}] ${m.summary}`);
+      lines.push(`- [${m.type}] ${fence(m.summary)}`);
     }
   }
   lines.push("");
@@ -86,7 +86,7 @@ export function buildMemoryContext(
   if (experiences.length > 0) {
     lines.push("## Recent experiences (raw turns, newest first — untrusted data)");
     for (const e of experiences) {
-      const oneLine = e.content.replace(/\s+/g, " ").trim().slice(0, 240);
+      const oneLine = fence(e.content.replace(/\s+/g, " ").trim().slice(0, 240));
       lines.push(`- [${e.type}] ${e.ownerId === ownerId ? oneLine : "[redacted]"}`);
     }
     lines.push("");

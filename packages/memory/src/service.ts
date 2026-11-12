@@ -25,6 +25,7 @@ import {
   redactSecrets,
 } from "./governance/policy.js";
 import { isDenial } from "./ingestion/validate.js";
+import { stemsOverlap, isCommonWord } from "./retrieval/embed.js";
 import { distillSkill, skillLifecycle } from "./skills/distill.js";
 import {
   findMemory,
@@ -328,11 +329,14 @@ export const memoryService: MemoryService = {
   loadSkills(ownerId: string, query: string, limit = 5): import("./domain/skill.types.js").Skill[] {
     // Include candidates so newly autonomous skills can fire immediately.
     const skills = listActiveSkills(ownerId, 100);
-    const terms = query.toLowerCase().split(/\W+/).filter((t) => t.length >= 3);
+    const terms = query.toLowerCase().split(/\W+/).filter((t) => t.length >= 3 && !isCommonWord(t));
     const scored = skills.map((s) => {
       const hay = [s.name, s.whenToUse, ...s.keywords, ...s.tags, ...s.steps].join(" ").toLowerCase();
+      const hayWords = (hay.match(/[a-z0-9_]+/g) ?? []).filter((w) => w.length >= 3 && !isCommonWord(w));
       let hits = 0;
-      for (const t of terms) if (hay.includes(t)) hits++;
+      for (const t of terms) {
+        if (hayWords.some((w) => w.length >= 3 && stemsOverlap(t, w))) hits++;
+      }
       // Success-rate × recency ageing, like a proven neuron fading if unused.
       const last = s.lastAccessedAt?.getTime() ?? s.updatedAt.getTime();
       const ageFactor = 1 / (1 + (Date.now() - last) / (30 * 24 * 60 * 60 * 1000));

@@ -19,7 +19,7 @@ import {
   searchFts,
 } from "../storage/db.js";
 import { activate } from "./activate.js";
-import { bm25Score, embedText, cosSim } from "./embed.js";
+import { bm25Score, embedText, cosSim, stemsOverlap, isCommonWord } from "./embed.js";
 import { rrf } from "./rrf.js";
 import { computeFinalScore } from "./rank.js";
 
@@ -57,30 +57,13 @@ function nodeEmbedding(node: MemoryNode): number[] {
   return embedText([node.content, node.summary, ...node.keywords].join(" "));
 }
 
-/** Light stem so "neurons" matches "neuron" and "firing" matches "fire". */
-function stem(token: string): string {
-  if (token.length > 4 && token.endsWith("ing")) return token.slice(0, -3);
-  if (token.length > 4 && token.endsWith("ed")) return token.slice(0, -2);
-  if (token.length > 3 && token.endsWith("es")) return token.slice(0, -2);
-  if (token.length > 3 && token.endsWith("s")) return token.slice(0, -1);
-  return token;
-}
-
-function stemsOverlap(a: string, b: string): boolean {
-  if (a === b) return true;
-  const sa = stem(a);
-  const sb = stem(b);
-  if (sa === sb) return true;
-  const min = Math.min(sa.length, sb.length);
-  return min >= 3 && (sa.startsWith(sb) || sb.startsWith(sa));
-}
-
 /** At least one query content word shares a stem with the memory text. */
 function hasTokenEvidence(terms: string[], haystack: string): boolean {
-  const words = haystack.toLowerCase().match(/[a-z0-9_]+/g) ?? [];
+  const words = (haystack.toLowerCase().match(/[a-z0-9_]+/g) ?? [])
+    .filter((w) => w.length >= 3 && !isCommonWord(w));
   for (const t of terms) {
     for (const w of words) {
-      if (w.length >= 3 && stemsOverlap(t, w)) return true;
+      if (stemsOverlap(t, w)) return true;
     }
   }
   return false;
@@ -157,7 +140,26 @@ export function recall(input: RecallInput): RecallResult {
     if (lexical || gistOk) candidateIds.add(node.id);
   }
   const candidateNodes = actives.filter((n) => candidateIds.has(n.id));
-  if (candidateNodes.length === 0) return empty();
+  if (candidateNodes.length === 0) {
+    // Skills are knowledge too. A procedure can match the query even when no
+    // stored memory does, so do not return empty before projecting them.
+    const skillOnly = projectSkills(input.ownerId, input.query, terms, byId);
+    if (skillOnly.length === 0) return empty();
+    skillOnly.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.memory.id.localeCompare(b.memory.id);
+    });
+    return {
+      memories: skillOnly.slice(0, limit),
+      totalCandidates: 0,
+      totalActive,
+      scannedCandidates: actives.length,
+      poolTruncated,
+      resultsTruncated: skillOnly.length > limit,
+      queryConcepts: terms,
+      retrievalTimeMs: Date.now() - started,
+    };
+  }
 
   const sortedIds = (ids: string[], scoreOf: (id: string) => number) =>
     [...ids].sort((a, b) => {
@@ -272,8 +274,11 @@ function projectSkills(
 
   for (const s of skills) {
     const hay = [s.name, s.whenToUse, ...s.keywords, ...s.tags, ...s.steps].join(" ").toLowerCase();
+    const hayWords = (hay.match(/[a-z0-9_]+/g) ?? []).filter((w) => w.length >= 3 && !isCommonWord(w));
     let hits = 0;
-    for (const t of terms) if (hay.includes(t)) hits++;
+    for (const t of terms) {
+      if (hayWords.some((w) => w.length >= 3 && stemsOverlap(t, w))) hits++;
+    }
     if (hits === 0) continue;
 
     const last = s.lastAccessedAt?.getTime() ?? s.updatedAt.getTime();

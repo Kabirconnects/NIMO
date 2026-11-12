@@ -2,10 +2,13 @@
 
 One neuron = one memory node. Neurons behave like real ones: they are
 retrieved by *semantic similarity* (embedding cosine on char n-gram
-vectors), *fired* by spreading activation along synapses, *decayed* by
-the forgetting curve `s(t) = s₀/(1 + age/τ)`, and *strengthened* by
-rehearsal (successful use refreshes `lastAccessedAt`). Recall fuses
-four independent rankings — BM25, entity, embedding, graph — by RRF:
+vectors), *fired* by spreading activation along synapses, and *decayed* by
+the forgetting curve `s(t) = s₀/(1 + age/τ)`. Recall itself is read-only:
+retrieving a memory does **not** refresh `lastAccessedAt` or raise
+confidence, so reading cannot silently strengthen a belief. Explicit
+writes (correction, consolidation, an intentional touch) are what count
+as rehearsal. Recall fuses four independent rankings — BM25, entity,
+embedding, graph — by RRF:
 `RRF(d) = Σ 1/(60 + rankᵢ(d))`.
 
 A neuron holds:

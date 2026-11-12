@@ -252,9 +252,12 @@ hybrid+graph. CI wired in `.github/workflows/memory-tests.yml`. Total test: 175 
 as of 2026-11-07 (AGI 147 + Dreamer 28). Live total 2026-11-08 is **207 assertions**
 (149 AGI + 28 Dreamer + 23 Formula + 7 Capture) — see below.
 See `experiments/2026-11-07-dreamer-curiosity-planner.md`.
-**Multi-factor formula (2026-11-07):** Replaced binary-gate + newest-first with A-MEM + HippoRAG
-multi-factor scoring: `0.35×base×retention + 0.30×PageRank + 0.20×relevance + 0.15×recency`
-where `base = importance × (1 + log(degree))`. Added retention class (stable/volatile/ephemeral).
+**Multi-factor formula (2026-11-07 — historical, superseded 2026-11-12):** Replaced binary-gate +
+newest-first with A-MEM + HippoRAG multi-factor scoring:
+`0.35×base×retention + 0.30×PageRank + 0.20×relevance + 0.15×recency`. This weighted a PageRank
+term that nothing ever computed (the column stayed 0), so the effective weights were skewed.
+The live formula is documented in §8a below; the `page_rank` column remains in the schema as
+legacy data but is **not** read by ranking.
 Identity facts are stable (never fade). Denials are now rejected at ingestion
 (ephemeral agent-state observations are not durable memories — see tandem fix 2026-11-08).
 Graph degree tracked on insertEdge. Recall limit 200→5000. Cumulative total as of 2026-11-07
@@ -274,3 +277,39 @@ rb4 "How does steering work?" have no exact index match; a dense embedding or sy
 close them). Full report: `Nimo/benchmarks/2026-11-08-universal-benchmark.md`.
 Tandem-fix writeup: `Nimo/experiments/2026-11-08-benchmark-fixes.md`. To claim research-grade proof,
 run with a BLIND corpus written by someone who didn't build the system.
+
+---
+
+## 8a. Implementation status (authoritative, 2026-11-12)
+
+This section supersedes any older optimistic claim above. Labels:
+**Implemented** = code path exists and is covered by the automated suites;
+**Partially implemented** = works for the documented scope but has known gaps;
+**Planned** = designed, not built; **Unsupported** = explicitly not provided.
+
+| Capability | Status | What is actually true |
+| --- | --- | --- |
+| Owner isolation & identity | **Implemented** | Request-scoped owner via `AsyncLocalStorage` (`src/runtime/context.ts`). Server derives identity from `req.user.id` / `req.user.ownerId`; model cannot set an owner. With `PAME_MULTI_USER=true` an unauthenticated request is denied `no_identity`. With it unset, single-user **local-dev fallback** owner `local` is deliberate. |
+| Mode permissions (Chat/Plan/Auto) | **Implemented** | Enforced inside tool execution, not just in prompts: Chat/Plan are read-only, Auto may write. Destructive ops in Auto return `confirmation_required` until the caller passes explicit confirmation. |
+| Secret blocking | **Implemented** | Pattern + assignment-based detection runs on create, update, teach, skill distillation and ingestion, before the experience/memory is stored. Talking *about* passwords, `tokenizer`, or "token budget" is not flagged. |
+| Deletion | **Implemented** | `forget` is transactional and idempotent: content/summary/keywords/evidence/embedding cleared, revisions redacted, edges removed, exclusive experiences redacted, FTS row removed, audit preserved without sensitive text. Bulk `forgetByQuery` defaults to a **preview** and only deletes exact direct matches after `{ confirm: true }`; graph-only neighbours are never swept in. |
+| Contradiction handling | **Partially implemented** | `src/graph/conflict.ts` separates similarity from contradiction (value-slot conflicts, negation, numeric/entity changes). Contradictions are preserved, linked with `contradicts`, and never merged away; repetition never raises confidence. Nuanced/ambiguous prose conflicts can still be missed — no LLM/NLI judge. |
+| Memory evolution / supersession | **Partially implemented** | Conservative classifier-driven evolution: supersession only on explicit correction or verified replacement, always with a revision row and audit entry. Not fully autonomous for every phrasing. |
+| Extraction (speech acts, roles) | **Implemented** | Questions and instructions are skipped; assistant and system output yield no facts; tool/document evidence is labelled lower-confidence; hedges become `inferred`; user identity facts are stable. |
+| Ranking | **Implemented (redesigned)** | Dead PageRank term removed and weights renormalised: `score = 0.35×relevance + 0.40×(base/2) + 0.15×recency + 0.10×confidence`, where `base = importance × (1 + log(1+degree))` and stable memories keep full recency. Deterministic, no double counting. |
+| Retrieval read-only | **Implemented** | Recall writes no edges, confidence, importance, degree or access counters. Covered by the read-only hardening test. |
+| Noise gating / truncation | **Implemented** | Queries need real token/FTS evidence (stopwords and stem collisions filtered), so unrelated queries return nothing. Scanned-candidate cap (5000) and `resultsTruncated` / `poolTruncated` / `totalActive` are reported, not hidden. |
+| Persistent embeddings | **Implemented (hashed)** | Embeddings persisted in the `memories.embedding` column and reloaded on restart. They are deterministic char n-gram hashes, **not** dense model embeddings. |
+| Jobs / workers | **Implemented (SQLite queue)** | Durable `memory_jobs` rows with attempts, backoff, claim, done/dead status and `recoverStaleJobs`; ingestion and maintenance workers perform real work. No Redis. |
+| Retention | **Implemented** | `applyRetention` archives expired *ephemeral* memories (never deletes stable ones by timer), redacts old experience bodies, prunes old revisions. |
+| Portability | **Implemented** | DB path is `PAME_DB_PATH`, else `PAME_DATA_DIR`, else `~/.nimo/pame.db`, resolved lazily. `closeDb` allows clean reopen; tests use temp DBs. |
+| FTS | **Implemented (optional)** | SQLite FTS5 index when available; it is an optimisation only — retrieval works without it. |
+| Benchmarks | **Implemented, limited** | Two suites (retrieval configs; 6-axis universal). Empty-expect questions no longer auto-pass; negative questions are scored by false positives; Recall/Precision/MRR and no-answer accuracy reported. Corpus and questions were written by the same author as the system — **not blind, not research-grade**. |
+| Robotics claims | **Partially implemented** | Robotic memories are ordinary typed nodes plus the universal substrate (`sensor`, `trajectory`, `hypothesis`, `experiment` + `causes`/`enables`/`observes`/`tests`/`replicates` edges). There is no robot control, simulator, or physical embodiment integration. |
+| Dense/neural embeddings, rerankers, graph DB | **Unsupported** | Deliberately out of scope: no GPU, no vector DB, no external embedding service. |
+| Authentication itself | **Unsupported by PAME** | PAME consumes an identity that the host server must authenticate. It does not implement login, sessions, or token verification. |
+
+**Live test totals (2026-11-12):** AGI 154, Dreamer 28, Formula 23, Capture 7, Evolution 20,
+Hardening 82, retrieval benchmark 18 questions, universal benchmark 62 questions — all passing.
+Commands: `pnpm --filter @workspace/memory run test:all` and
+`pnpm --filter @workspace/memory run test:universal`.

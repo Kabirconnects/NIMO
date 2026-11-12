@@ -6,11 +6,11 @@ activated neighborhood is the answer.
 
 ## Human-like ordering (2026-11-07)
 
-Recall is **newest-first** (recency bias): among equally relevant
-memories, the most recent surfaces first. Ageing strength decays with
-time since last access — rehearsal refreshes it, neglect fades it.
-This mirrors how human memory actually works and how lab humanoids
-surface recent observations before older ones.
+Recall ranks by relevance and strength, with a recency component: among
+equally relevant memories, the more recent one surfaces first. Ageing
+strength decays with time since `lastAccessedAt` (falling back to
+`updatedAt`), but **reading does not refresh it** — recall is read-only.
+Rehearsal is an explicit write, not a retrieval side effect.
 
 ## The recall pipeline (live, 2026-11-07)
 
@@ -47,8 +47,10 @@ A(v) = S(v, q) + λ · Σ w(u,v) · A(u)      with λ = 0.5, decay = 0.6 per hop
 
 Bounded hops (≤ 4), per-hop decay. This *is* the neuron behaviour:
 activation travels along synapses, decaying, so a thought reminds you
-of another thought you never asked about — exactly like HippoRAG's
-Personalized PageRank, running in plain SQLite.
+of another thought you never asked about — inspired by HippoRAG's
+graph traversal, but implemented as bounded spreading activation, **not**
+Personalized PageRank. There is no PageRank computation anywhere in the
+engine; the legacy `page_rank` column is unused by ranking.
 
 ## Ageing + rehearsal
 
@@ -56,9 +58,13 @@ Personalized PageRank, running in plain SQLite.
 s(t) = s₀ / (1 + age/τ)    with τ = 30 days × (1 + importance)
 ```
 
-A memory decays with age since last access; *use refreshes it* —
-`lastAccessedAt` resets, so rehearsal keeps the neuron bright. Neglect
-fades it. Human forgetting curve, encoded.
+Ageing is computed from `lastAccessedAt` when the score is calculated.
+**Retrieval itself is read-only** (2026-11-12): recall never writes
+`lastAccessedAt`, confidence, importance, degree or edges, so repeated
+queries cannot silently strengthen a memory. Rehearsal has to be an
+explicit write (a correction, consolidation, or an explicit touch),
+not a side effect of reading. Neglect still fades; reading alone does not
+refresh.
 
 ## Worked example (tested 2026-11-07)
 

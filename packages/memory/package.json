@@ -21,7 +21,10 @@
     "test:benchmark": "tsx scripts/benchmark-runner.ts",
     "test:formula": "tsx scripts/formula-deep-test.ts",
     "test:capture": "tsx scripts/capture-dedup-test.ts",
-    "test:all": "tsx scripts/agi-test.ts && tsx scripts/dreamer-test.ts && tsx scripts/formula-deep-test.ts && tsx scripts/capture-dedup-test.ts && tsx scripts/benchmark-runner.ts",
+    "test:evolve": "tsx scripts/evolve-test.ts",
+    "test:hardening": "tsx scripts/hardening-test.ts",
+    "test:universal": "tsx scripts/universal-benchmark-runner.ts",
+    "test:all": "tsx scripts/agi-test.ts && tsx scripts/dreamer-test.ts && tsx scripts/formula-deep-test.ts && tsx scripts/capture-dedup-test.ts && tsx scripts/evolve-test.ts && tsx scripts/hardening-test.ts && tsx scripts/benchmark-runner.ts",
     "ci": "npm test && npm run test:all"
   },
   "dependencies": {

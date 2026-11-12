@@ -2,41 +2,666 @@
 
 # Nimo
 
-[![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178c6)](https://www.typescriptlang.org) [![Node.js](https://img.shields.io/badge/Node.js-20.9+-339933)](https://nodejs.org) [![pnpm](https://img.shields.io/badge/pnpm-11.25-F46F2E)](https://pnpm.io) [![Turborepo](https://img.shields.io/badge/Turborepo-2.11-ED1C24)](https://turborepo.com) [![AI SDK](https://img.shields.io/badge/AI%20SDK-7.0-000000)](https://ai-sdk.dev) [![SQLite](https://img.shields.io/badge/SQLite-WAL-003B00)](https://www.sqlite.org) [![OpenTUI](https://img.shields.io/badge/OpenTUI-terminal-6366f1)](https://opentui.com) [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org) [![Bun](https://img.shields.io/badge/Bun-1.3+-FBAC00)](https://bun.sh) [![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
+**A persistent, associative, governed memory engine for tool-using agents.**
+
+[![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178c6)](https://www.typescriptlang.org) [![Node.js](https://img.shields.io/badge/Node.js-20.9+-339933)](https://nodejs.org) [![pnpm](https://img.shields.io/badge/pnpm-11.25-F46F2E)](https://pnpm.io) [![Turborepo](https://img.shields.io/badge/Turborepo-2.11-ED1C24)](https://turborepo.com) [![AI SDK](https://img.shields.io/badge/AI%20SDK-7.0-000000)](https://ai-sdk.dev) [![SQLite](https://img.shields.io/badge/SQLite-WAL-003B00)](https://www.sqlite.org) [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org) [![Bun](https://img.shields.io/badge/Bun-1.3+-FBAC00)](https://bun.sh) [![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 
 </div>
 
 > **Nimo is not an AI agent. Nimo is a memory.**
+>
+> This repository contains both the memory engine and an agent harness that exercises it. The research claim is about the memory: an agent should not start every turn as a stranger, and it should not merely accumulate chat history. It should retain evidence, connect related knowledge, preserve contradictions, forget safely, and turn repeated procedures into reusable skills.
 
-Nimo is a tool-using agent system with a memory that learns — and grows by doing.
-Built with TypeScript, the Vercel AI SDK, and a single-file SQLite memory (PAME).
+---
 
-- **CLI** (`apps/cli`) — OpenTUI terminal UI (early scaffold, see [Status](#status)).
-- **Agents** (`packages/agents`) — `runAgent()` tool-using runtime with Chat / Plan / Auto modes and multiple models.
-- **Memory (PAME)** (`packages/memory`) — a human-like, graph-organized, hybrid-retrieval memory engine with governance. One endless stream, no sessions.
-- **Server** (`apps/server`) — a small Express API that exposes the agent as an HTTP endpoint (`POST /agent`).
+## Abstract
 
-## Contents
+Large-language-model agents are usually given memory as an afterthought: a transcript is appended to a context window, or text is embedded into a vector store and retrieved by cosine similarity. Both approaches lose structure. They cannot distinguish a fact from a question, a correction from a repetition, or a supported belief from a guess. They cannot explain why a memory exists. They cannot delete one without leaving copies in indexes, edges, summaries, and audit trails. They rarely learn *how* to do something — only *what* was said.
 
-- [Prerequisites](#prerequisites)
-- [Install](#install)
-- [Configuration](#configuration)
-- [Run](#run)
-- [API](#api)
-- [How it works](#how-it-works)
-- [Modes & tools](#modes--tools)
-- [Tool foundry](#tool-foundry)
-- [Workspace model](#workspace-model)
-- [Monorepo structure](#monorepo-structure)
-- [Testing](#testing)
-- [Research](#research)
-- [Status](#status)
-- [Full PAME research notes](#full-pame-research-notes)
-- [Contributing](#contributing)
-- [Security](#security)
-- [License](#license)
+**Nimo** is a memory system designed around a different unit of retention: the **evidence-backed memory node**, connected by typed, directional **associations**, governed by explicit **write, retrieval, and deletion rules**, and complemented by **procedural skills** distilled from tool-using experience. It runs in a single SQLite file, requires no external embedding service, and exposes its capabilities as typed tools that any AI-SDK-compatible agent can call.
 
-## Prerequisites
+The system is deliberately conservative. Retrieval is **read-only**: reading a memory does not strengthen it. Contradictions are **preserved and linked**, not silently resolved. Destructive operations require **explicit confirmation**. Owner identity is supplied by the host and is never accepted from the model. These choices trade some apparent "intelligence" for auditability, reversibility, and trust.
+
+We report the current implementation honestly: a 6-axis universal suite passes 62/62 questions, and a retrieval benchmark passes all 18 questions in its hybrid configurations. Both corpora were authored alongside the system and are **not blind**, so the numbers are regression evidence, not research-grade proof. The contribution is the architecture and its verified behaviour, not a claim of state-of-the-art retrieval.
+
+---
+
+## 1. Introduction
+
+An agent without memory is a sequence of isolated guesses. An agent with a transcript is slightly better, but a transcript is not memory: it is a log. It has no notion of importance, no distinction between a user's assertion and the assistant's speculation, no links between related decisions, and no safe way to forget.
+
+The memory problem for agents has four parts:
+
+1. **What should be retained?** Not every token deserves permanence. A question is not a fact. An assistant's claim is not independent evidence. A password must never be stored.
+2. **How should it be found?** Exact keyword search misses paraphrase. Dense similarity misses structure and provenance. A useful system needs several retrieval signals and a way to combine them.
+3. **How should it change?** New information may duplicate, support, contradict, or supersede an existing memory. These are different operations and must not collapse into "overwrite the row".
+4. **How should it be removed?** Deletion must reach content, embeddings, edges, revisions, indexes, and derived summaries — without destroying the audit trail that proves the deletion happened.
+
+Nimo addresses these questions with five layers that are kept separate: **experience**, **memory**, **association**, **index**, and **governance**. The separation is the design. A message is an experience; a fact extracted from it is a memory; a relationship between memories is an edge; a retrieval index is a view; and a policy decides what may cross each boundary.
+
+The system is also intended to be **useful to other agents**, not only to this repository's server. Its public package exports the memory service, request-scoped identity helpers, prompt-context builders, and mode-split tool sets. A host agent supplies an owner identity and a mode; Nimo supplies persistent, governed memory.
+
+### 1.1 Contributions
+
+- **A five-layer memory architecture** with explicit boundaries between evidence, belief, association, index, and governance.
+- **Evidence-aware ingestion**: rule-based extraction, speech-act filtering, secret detection, source attribution, and confidence derived from provenance rather than repetition.
+- **Conservative conflict handling**: similarity, contradiction, and supersession are classified separately; contradictions are retained and linked.
+- **Hybrid retrieval with a bounded associative step**: BM25, entity matching, and hashed char n-gram embeddings fused by Reciprocal Rank Fusion, followed by bounded spreading activation over typed edges.
+- **A redesigned deterministic ranking function** that removes an unimplemented PageRank term and combines relevance, importance/degree, recency, and confidence with stated weights.
+- **Read-only recall**: retrieval never writes confidence, importance, degree, access counters, or edges.
+- **Governed deletion**: transactional forgetting that clears content, embeddings, edges, revisions, and FTS rows while preserving a non-sensitive audit record.
+- **Procedural memory**: candidate skills distilled from tool-using turns, rehearsed through outcomes, curated by a lifecycle policy, and selected with a UCB bandit.
+- **A hardened coding-tool layer**: sandboxed file operations, structured process execution, automatic test detection, git inspection, source outlining, dry-run refactoring, and atomic writes.
+
+### 1.2 What this document is not
+
+This is not a claim that Nimo is conscious, generally intelligent, or a complete cognitive architecture. It is not a claim that the graph always beats a vector baseline. It is not a claim that the current benchmark is blind or definitive. Section 8 lists the limitations explicitly.
+
+---
+
+## 2. Design Principles
+
+| Principle | Consequence in the implementation |
+| --- | --- |
+| **Evidence before belief** | Every memory carries provenance: an experience id, source kind, quote, and observation time. Assistant output is preserved for continuity but is not treated as independent evidence. |
+| **One continuous stream** | There are no conversation buckets. Experiences are global to an owner, and retrieval is by content, entity, embedding, and graph relation. |
+| **Structure over similarity alone** | Typed nodes and typed edges are first-class. Similarity is one retrieval signal, not the data model. |
+| **Governance at the write boundary** | Secret detection, speech-act filtering, and policy checks run before storage, not after retrieval. |
+| **Reading must not change belief** | Recall is read-only. Rehearsal is an explicit write. |
+| **Contradictions are data** | Conflicting memories are preserved with a `contradicts` edge. The system may lower confidence; it does not pretend the conflict never existed. |
+| **Deletion is a graph operation** | Forgetting removes or redacts every derived representation and verifies that recall no longer returns the memory. |
+| **Identity belongs to the host** | The model never supplies an owner id. Request-scoped context carries the authenticated identity and mode. |
+| **Deterministic where possible** | Hashing embeddings, BM25, RRF, and ranking are local arithmetic. No hidden API, no model download, no GPU requirement. |
+| **The workspace is trusted code** | The tool sandbox prevents traversal and shell injection; it is not a virtual machine. Do not point it at an untrusted repository. |
+
+---
+
+## 3. System Overview
+
+```text
+User turn
+   │
+   ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Agent runtime (packages/agents)                              │
+│  runAgent(prompt, mode, model, effort, { ownerId })          │
+│    ├─ establish request-scoped identity + permissions        │
+│    ├─ buildMemoryContext(ownerId, prompt)                    │
+│    ├─ loadSkills(ownerId, prompt, 3)                         │
+│    ├─ generateText(... tools from mode ...)                  │
+│    └─ record the turn as an experience                       │
+└──────────────────────────────────────────────────────────────┘
+   │                                   ▲
+   │ tool calls                        │ context block
+   ▼                                   │
+┌───────────────────────────────┐   ┌──────────────────────────┐
+│ Tool layer                    │   │ Memory engine (PAME)     │
+│  filesystem · code · research │──▶│  recall · remember ·     │
+│  memory read/write/destructive│   │  link · teach · forget   │
+└───────────────────────────────┘   └───────────┬──────────────┘
+                                                │
+                                                ▼
+                                   ┌──────────────────────────┐
+                                   │ ~/.nimo/pame.db (SQLite) │
+                                   │ experiments · memories · │
+                                   │ edges · entities ·       │
+                                   │ policies · revisions ·   │
+                                   │ audit · jobs · skills    │
+                                   └──────────────────────────┘
+```
+
+### 3.1 The five layers
+
+1. **Experience layer** — what actually happened: user messages, assistant responses, tool calls, tool results, observations, timestamps. Experiences are hashed for deduplication and retained as evidence.
+2. **Memory layer** — what Nimo believes is worth retaining: facts, preferences, decisions, events, concepts, procedures, goals, observations. Each node has confidence, importance, retention class, validity interval, and evidence.
+3. **Association layer** — typed, directional, weighted edges: `supports`, `contradicts`, `supersedes`, `causes`, `enables`, `observes`, `tests`, `replicates`, `related_to`, `depends_on`, and others. Degree is tracked and repairable.
+4. **Index layer** — how memories are found: BM25/FTS text evidence, entity names, hashed char n-gram embeddings, recency, and graph activation. Indexes are derived; they never replace the source of truth.
+5. **Governance layer** — what may be stored, changed, retrieved, shared, or forgotten. It owns secret detection, owner scoping, mode permissions, deletion, retention, and audit.
+
+### 3.2 Storage
+
+One SQLite database, WAL mode, owner-scoped queries. The default path is `~/.nimo/pame.db`; `PAME_DB_PATH` overrides the file, and `PAME_DATA_DIR` overrides the root. The database resolves lazily and can be closed and reopened cleanly.
+
+| Table | Responsibility |
+| --- | --- |
+| `experiences` | Original interaction evidence, hashed for deduplication |
+| `memories` | Consolidated, typed, versioned memory nodes |
+| `memory_edges` | Typed, directional relationships with weight and confidence |
+| `memory_entities` | Canonical people, projects, technologies, concepts |
+| `memory_policies` | Per-owner governance settings |
+| `memory_revisions` | Version history; the original is never silently rewritten |
+| `memory_audit` | Operation history without stored secrets |
+| `memory_jobs` | Durable ingestion, embedding, and maintenance queue |
+| `skills` | Procedures with use/success/failure counts and confidence |
+
+There is no MongoDB or Neo4j dependency. The graph is represented in SQLite with explicit `from`/`to` edges and indexed adjacency queries.
+
+---
+
+## 4. How Nimo Memory Works
+
+### 4.1 Capture: one endless stream
+
+Every turn is written as an `Experience`. The content is hashed so identical turns can be detected, but capture deliberately salts the hash so repeated identical turns remain distinguishable as separate experiences. Consolidation, not capture, is responsible for deciding that two turns express the same memory.
+
+The agent loop records:
+
+- the user's prompt as first-hand evidence;
+- the assistant's final text for continuity (but extraction yields no independent facts from assistant text);
+- the tools that were actually called, which are later used to decide whether a procedure is worth distilling.
+
+This is why "Chat" and "Plan" can still learn even though their **memory tools** are read-only: the runtime's internal capture path is separate from the model-callable tool surface. The model cannot use a tool to write in Chat/Plan, but the host may still preserve the turn.
+
+### 4.2 Extraction and validation
+
+Extraction is deterministic and rule-based. It does not call an LLM, which makes it testable and reproducible. The pipeline distinguishes:
+
+- **Questions** — not facts. "Which database did we choose?" is a retrieval cue, not a durable assertion.
+- **Instructions** — not facts. "Fix the failing test" is a task, not a belief.
+- **Hedged statements** — retained as `inferred` with lower confidence. "It might be SQLite" is weaker than "We chose SQLite".
+- **User assertions** — the primary source of durable facts.
+- **Assistant/system output** — preserved as experience, but not treated as independent evidence.
+- **Tool/document evidence** — labelled with lower confidence and source attribution.
+- **Identity facts** — stable by policy; they do not fade like ordinary memories.
+- **Denials / ephemeral agent state** — rejected at ingestion; a passing "I don't know" should not become a permanent belief.
+
+Before storage, every candidate passes the governance layer:
+
+- secret and credential detection;
+- owner scoping;
+- retention and visibility classification;
+- duplicate and near-duplicate detection;
+- evidence construction with `experienceId`, `kind`, `quote`, and `observedAt`.
+
+### 4.3 Consolidation: merge, support, contradict, supersede
+
+Consolidation is intentionally conservative. Given a new candidate and an existing memory, the engine asks what kind of relationship the evidence supports:
+
+| Situation | Action |
+| --- | --- |
+| Exact or near-exact duplicate | Attach new evidence, raise confidence/importance within policy, record a revision |
+| Strong keyword overlap, same type, long content | Treat as the same memory and merge evidence |
+| Logical contradiction (value-slot conflict, negation, numeric/entity change) | Keep both memories, add a `contradicts` edge, do not merge |
+| Explicit correction or verified replacement | Mark the old memory `superseded`, record a revision, preserve historical content |
+| Merely related | Create a typed `related_to` / `supports` / `depends_on` edge to the closest active memory |
+| Ambiguous | Keep both; do not invent certainty |
+
+Two rules matter more than the rest:
+
+1. **Similarity is not contradiction.** Two sentences can share most of their words and disagree about a value. The conflict classifier separates lexical similarity from actual value conflict.
+2. **Repetition is not evidence.** Retrieving the same memory repeatedly must not raise its confidence. Confidence is about provenance quality, not frequency of access.
+
+The current classifier is heuristic. Nuanced prose contradictions can still be missed. There is no LLM/NLI judge. This is recorded as a partial implementation, not a solved problem.
+
+### 4.4 The association graph
+
+Memories are nodes; relationships are typed edges with weight and confidence. The graph supports:
+
+- **Association** — related facts surface together.
+- **Explanation** — a retrieved memory can be followed to the evidence and related decisions that support it.
+- **Spreading activation** — connected memories that share no query words can still surface.
+- **Conflict visibility** — contradictions are edges, not deletions.
+- **Degree-aware importance** — well-connected memories receive a modest ranking boost.
+- **Repair** — dangling edges and inconsistent degree counts can be detected and fixed.
+
+The graph is deliberately not used as a license for unbounded traversal. Activation is bounded in hops and decayed per step so a large graph cannot turn into a runaway walk.
+
+### 4.5 Retrieval: candidates, fusion, activation
+
+Retrieval is a five-stage pipeline:
+
+1. **Query cues** — the user's message becomes tokens, entity names, and an embedding.
+2. **Candidate generation** — three independent ranked lists:
+   - **BM25 keyword**: `score += idf · (f·(k₁+1)) / (f + k₁(1−b+b·docLen/avgLen))`, with `k₁ = 1.5`, `b = 0.75`.
+   - **Entity match**: exact canonical entity names.
+   - **Embedding cosine**: `cos(u,v) = u·v/(‖u‖‖v‖)` over deterministic hashed char n-gram vectors (dimension 256). Morphological relatives share buckets, so "automobile" and "automobiles" can fire together.
+3. **Fusion** — Reciprocal Rank Fusion over the candidate lists:
+
+   ```text
+   RRF(d) = Σ 1 / (60 + rank_i(d))
+   ```
+
+   RRF is robust to score-scale differences between BM25 and cosine, and it rewards documents that appear in multiple lists.
+
+4. **Associative activation** — bounded spreading activation from the fused seeds:
+
+   ```text
+   A(v) = S(v, q) + λ · Σ w(u,v) · A(u)
+   ```
+
+   with `λ = 0.5` and a per-hop decay of `0.6`, bounded to at most four hops. `S(v,q)` is the fused seed score and `w(u,v)` is the edge weight. This is **not** Personalized PageRank; there is no PageRank computation in the engine. The legacy `page_rank` column exists for historical data and is not read by ranking.
+
+5. **Assembly** — a compact prompt block is built: current activity (newest first), relevant skills, recalled memories, and evidence. The prompt never receives the whole graph.
+
+The embedding is a dependency-free hashed char n-gram representation, not a dense neural embedding. It is deterministic, persistent in SQLite, and survives restarts. Dense embeddings and cross-encoder rerankers are explicitly out of scope.
+
+### 4.6 Ranking
+
+After candidates are retrieved, the deterministic ranking function is:
+
+```text
+score = 0.35 · relevance
+      + 0.40 · (base / 2)
+      + 0.15 · effectiveRecency
+      + 0.10 · confidence
+
+base = importance · (1 + ln(1 + degree))
+```
+
+- `relevance` is the normalised fused retrieval score.
+- `base` rewards important and well-connected memories, normalised by 2 so the term stays in a comparable range.
+- `effectiveRecency` is `1` for stable memories; ephemeral memories are multiplied by `0.3` so temporary observations do not outrank durable knowledge.
+- `confidence` reflects evidence quality and provenance, not repetition.
+
+There is no hidden term and no non-deterministic reranker. The previous design included a PageRank weight that could never be non-zero because nothing computed it; that term was removed and the remaining weights were renormalised.
+
+### 4.7 Decay, retention, and read-only recall
+
+Ageing follows a forgetting curve:
+
+```text
+s(t) = s₀ / (1 + age/τ),    τ = 30 days × (1 + importance)
+```
+
+Age is computed from `lastAccessedAt` when present, falling back to `updatedAt`. The crucial rule is:
+
+> **Retrieval is read-only.** Recall never writes `lastAccessedAt`, confidence, importance, degree, access counters, or edges.
+
+This prevents a feedback loop in which repeatedly asking about a memory makes it permanently true or permanently prominent. Rehearsal must be an explicit write: a correction, a consolidation, a deliberate touch, or a skill outcome. Neglect still fades; reading alone does not refresh.
+
+Retention has three classes:
+
+- **stable** — identity facts, decisions, durable preferences; never timer-deleted.
+- **normal** — ordinary memories; subject to decay-based ranking but not automatic deletion.
+- **ephemeral** — temporary observations; archived when expired, with a reduced recency weight while active.
+
+A retention worker archives expired ephemeral memories, redacts old experience bodies, and prunes old revisions. It never timer-deletes stable memories.
+
+### 4.8 Procedural memory: skills
+
+Facts tell an agent what is true. Skills tell it what to do. A skill is a procedure with a track record:
+
+```text
+name, whenToUse, steps[], toolsUsed[], keywords[],
+status: candidate | active | archived,
+uses, successes, failures, confidence, lastAccessedAt
+```
+
+The lifecycle is:
+
+1. **Distillation** — when a tool-using turn occurs and no loaded skill covered it, the turn can be distilled into a candidate skill. Steps come from the response, tools from the actual tool calls, and keywords from the prompt.
+2. **Rehearsal** — `useSkill(success)` increments uses and the appropriate outcome count, updates confidence, and records the rehearsal time.
+3. **Curation** — every turn with skills present runs the lifecycle:
+   - candidate with at least one success → **promote** to active;
+   - active with at least three failures and more failures than successes → **archive**;
+   - active with more failures than successes and confidence below `0.4` → **demote** to candidate;
+   - otherwise → **keep**.
+4. **Selection** — each skill is an arm of a multi-armed bandit. The posterior is `Beta(α = 1 + successes, β = 1 + failures)`, and selection uses:
+
+   ```text
+   UCB = μ + sqrt(2 · ln(t) / n)
+   ```
+
+   where `μ = α/(α+β)`, `t` is total uses, and `n` is the arm's uses. This is exploration with a preference for skills that have worked.
+
+5. **Composition** — two active, confident skills can compose into a macro-skill when their keyword overlap is at least `0.6` and both confidences are at least `0.6`. This is chunking: a repeated sequence becomes one reusable procedure.
+
+Skills are stored in the same SQLite database and are owner-scoped. Policy gates apply to skill distillation, so a secret cannot be laundered into a procedure.
+
+### 4.9 Governance, identity, and deletion
+
+**Identity.** The host establishes an owner per request through `AsyncLocalStorage`. The model never supplies an owner id. In `PAME_MULTI_USER=true` mode, an unauthenticated request is denied with `no_identity`. In single-user local development, the deliberate fallback owner is `local`; this is a documented convenience, not an authentication mechanism.
+
+**Mode permissions.** Tools enforce permissions at execution time, not only in the prompt:
+
+- `Chat` — memory read + research; memory writes are not exposed.
+- `Plan` — read-only orientation + memory read + research.
+- `Auto` — read/write + memory read/write/destructive + research.
+
+Destructive memory operations additionally require `destructiveConfirmed=true` from the host. The model cannot set that flag.
+
+**Secrets.** Detection combines patterns and assignment heuristics. It runs on create, update, teach, skill distillation, and ingestion. Talking *about* passwords or a "token budget" is not automatically flagged; an actual credential assignment is.
+
+**Retrieved memories are untrusted input.** They are fenced and labelled as evidence. A retrieved memory must not be able to override system instructions, tool permissions, or security policy.
+
+**Deletion.** Forgetting is transactional and idempotent:
+
+```text
+find → confirm → clear content/summary/keywords/evidence/embedding
+     → redact revisions
+     → remove edges
+     → redact exclusive experiences
+     → remove FTS row
+     → preserve a non-sensitive audit record
+     → verify recall no longer returns the memory
+```
+
+Bulk deletion defaults to a preview. `forgetByQuery` only deletes exact direct matches after `{ confirm: true }`; graph-only neighbours are never swept in. A partial failure must not leave a searchable deleted memory.
+
+### 4.10 Durable jobs
+
+Ingestion, embedding, maintenance, and retention work through `memory_jobs` rows with attempts, backoff, claim, done/dead status, and stale-job recovery. This is a real SQLite queue, not a fake "job created" response. Failed jobs dead-letter with their error instead of retrying forever.
+
+---
+
+## 5. Why This Is Useful for Other Agents
+
+Nimo is packaged as a library, not only as this repository's server. A host agent can use it without adopting the agent loop, the model registry, or the UI.
+
+### 5.1 What a host gets
+
+| Property | Why it matters |
+| --- | --- |
+| **Persistent, structured memory** | Decisions, preferences, facts, events, procedures, and goals survive restarts and model changes. |
+| **Evidence and audit** | Every memory can be traced to an experience and a quote. Mutations are audited. |
+| **Owner isolation** | The host supplies the identity; the model cannot forge it. Concurrent requests do not share `AsyncLocalStorage` state. |
+| **Mode-aware tools** | Read-only, read/write, and destructive capabilities are separated into distinct tool sets. |
+| **Read-only recall** | Retrieval cannot silently reinforce a belief. |
+| **Safe forgetting** | Deletion is a graph-wide operation with a verification step. |
+| **No external services** | SQLite + deterministic arithmetic. No vector database, embedding API, Redis, or GPU. |
+| **Portable** | `PAME_DB_PATH` / `PAME_DATA_DIR` / `~/.nimo` defaults; clean reopen. |
+| **Agent-agnostic** | The public surface is typed functions and AI-SDK tools, not a specific model or UI. |
+| **Procedural learning** | Tool-using turns can become skills with outcomes, not just chat history. |
+
+### 5.2 Integration shape
+
+The host must do two things: establish a request context and choose a tool set.
+
+```ts
+import {
+  memoryService,
+  memoryReadTools,
+  memoryWriteTools,
+  memoryDestructiveTools,
+  buildMemoryContext,
+  runWithMemoryContext,
+} from "@workspace/memory";
+
+// 1. The host authenticates the user and supplies the owner.
+await runWithMemoryContext(
+  { ownerId: authenticatedUserId, mode: "Auto", destructiveConfirmed: false },
+  async () => {
+    // 2. Build a compact prompt block from relevant memory.
+    const ctx = buildMemoryContext(authenticatedUserId, userPrompt);
+
+    // 3. Give the model only the capabilities this mode allows.
+    const tools = {
+      ...memoryReadTools,
+      ...memoryWriteTools,
+      // ...memoryDestructiveTools, only when the host supports confirmation
+    };
+
+    // 4. Call the model with the memory block and tools.
+    const result = await generateText({ model, system: ctx.promptBlock, prompt: userPrompt, tools });
+
+    // 5. Preserve the turn. This is separate from model-callable writes.
+    memoryService.remember({
+      ownerId: authenticatedUserId,
+      content: userPrompt,
+      type: "message",
+      role: "user",
+    });
+    return result;
+  },
+);
+```
+
+The exact imports and tool names are stable; the host is free to wrap them, rename them, or expose only a subset.
+
+### 5.3 Scenarios
+
+- **Coding agent** — remembers architectural decisions, rejected approaches, project conventions, and recurring test commands. The upgraded tool layer lets it read, search, edit, run, and verify code in the workspace.
+- **Research assistant** — retains sourced claims, contradictions, and open questions; distinguishes evidence from inference.
+- **Support agent** — remembers a customer's preferences and prior resolutions, while enforcing owner isolation and safe deletion.
+- **Robotics / simulation** — stores `sensor`, `trajectory`, `hypothesis`, and `experiment` nodes and typed `causes` / `enables` / `observes` / `tests` / `replicates` edges. The substrate is task-agnostic; embodiment and control are not implemented.
+- **Multi-agent system** — each agent gets an owner-scoped view; shared memory requires an explicit host policy, not a model decision.
+
+### 5.4 What "better than a vector bag" means here
+
+A vector bag retrieves by similarity. Nimo retrieves by similarity **and** structure:
+
+- a decision can surface because it is connected to the project that depends on it;
+- a contradiction can surface instead of being averaged away;
+- a procedure can surface because it succeeded before, not because its wording is close;
+- a deleted memory actually disappears from every derived index;
+- a retrieved memory carries provenance, so the agent can say *why* it believes it.
+
+This is not a claim that the graph always wins. On the current synthetic retrieval benchmark, the graph configuration ties the non-graph hybrid configuration at 100% Recall / 1.000 MRR. The graph's value is explanatory and multi-hop; the benchmark does not yet demonstrate a measurable lift on this corpus.
+
+---
+
+## 6. Evaluation
+
+### 6.1 Test suites
+
+All numbers below were produced in isolated temporary databases on 2026-11-12. The real `~/.nimo/pame.db` was not used.
+
+| Suite | Checks | Result |
+| --- | ---: | --- |
+| AGI | 154 | 154/154 |
+| Dreamer | 28 | 28/28 |
+| Formula | 23 | 23/23 |
+| Capture dedup | 7 | 7/7 |
+| Evolution | 20 | 20/20 |
+| Hardening | 82 | 82/82 |
+| **Total** | **314** | **314/314** |
+
+The hardening suite covers identity, mode permissions, secret blocking, extraction, conflicts, deletion, bulk-deletion preview, read-only recall, degree/dangling-edge repair, noise gating, truncation reporting, transactions, portability, retention, jobs, and prompt-injection fencing.
+
+### 6.2 Retrieval benchmark
+
+18 questions, including 2 negative questions that should return no answer.
+
+| Configuration | Recall | MRR | No-answer accuracy |
+| --- | ---: | ---: | ---: |
+| Vector only (hashed n-grams) | 88.9% | 0.747 | 0% |
+| Vector + keyword + entity (RRF) | 100% | 1.000 | 100% |
+| Hybrid + graph activation | 100% | 1.000 | 100% |
+
+Interpretation: the non-vector signals matter. Vector-only retrieval misses paraphrase/lexical cases and, more importantly in this corpus, answers negative questions it should reject. Adding BM25, entity matching, and the noise gate fixes both. Graph activation does not add a measured lift on this small synthetic corpus; it remains valuable for multi-hop and explanation, but that value is not demonstrated by these numbers.
+
+### 6.3 Universal benchmark
+
+62 questions across six axes, 100% pass:
+
+| Axis | Questions | Result |
+| --- | ---: | ---: |
+| Memory | 12 | 100% |
+| Research | 10 | 100% |
+| Coding | 10 | 100% |
+| Robotics | 10 | 100% |
+| Adaptation | 10 | 100% |
+| Forgetting | 10 | 100% |
+| **Total** | **62** | **100%** |
+
+No-answer accuracy was 100%. The suite includes negative questions, so a system that always returns something does not pass automatically.
+
+### 6.4 What the evidence does and does not show
+
+**Shows:**
+
+- The implementation passes its own regression and hardening suites.
+- Hybrid retrieval beats vector-only on the authored corpus.
+- Read-only recall, secret blocking, deletion, and mode permissions are enforced in code and tested.
+- The universal suite exercises memory, research, coding, robotics, adaptation, and forgetting.
+
+**Does not show:**
+
+- State-of-the-art retrieval. The corpus is synthetic and was authored alongside the system.
+- Blind generalization. A blind corpus written by someone who did not build the system has not been run.
+- That the graph beats a simpler baseline on real-world data. On this corpus it ties the non-graph hybrid configuration.
+- That hashed n-gram embeddings are competitive with dense embeddings. They are a dependency-free stand-in.
+
+These limitations are part of the result, not a footnote to hide.
+
+---
+
+## 7. The Agent Tool Layer (`packages/agents/src/tools`)
+
+The agent harness exposes **20 non-memory tools** plus **12 memory tools** (32 total in `Auto`). The tool layer was designed around a simple question: can an agent actually do software work — read a file, find a symbol, make a targeted edit, run the tests, inspect the diff, and recover from failure — without giving it an unrestricted shell?
+
+### 7.1 Design goals
+
+- **Safe by construction** — no shell interpolation, no path traversal, no secret reads, no accidental overwrite.
+- **Preview before destruction** — destructive tools support `dryRun`; refactoring is dry-run by default.
+- **Structured output** — tools return `success`, `exitCode`, `durationMs`, counts, and failure lines, not an opaque text blob.
+- **Useful truncation** — large outputs keep the tail, where build and test errors usually are.
+- **Atomic writes** — a crash cannot leave a half-written source file.
+- **Mode-aware permissions** — enforced at execution, not just by hiding tools from the prompt.
+- **Local project awareness** — commands see `node_modules/.bin`, so `tsc`, `eslint`, and `vitest` resolve like they do in an npm script.
+
+### 7.2 Filesystem tools (8)
+
+| Tool | What it does | Safety / capability |
+| --- | --- | --- |
+| `listFiles` | List a directory, optionally recursive | Glob filters, depth limit, size/mtime metadata, sorting, hides dotfiles by default, skips `node_modules`/`.git`/build output/symlinks/secrets |
+| `readFile` | Read a text file | Line numbers, `offset`/`limit` paging, binary detection, byte cap, `nextOffset` for continuation, secrets blocked |
+| `writeFile` | Create or overwrite a file | Creates parent directories, refuses overwrite unless `overwrite=true`, atomic temp-file + rename |
+| `editFile` | Exact-string replacement | Requires a unique match by default, `replaceAll` for deliberate global edits, CRLF/LF adaptation, `dryRun` preview, atomic write |
+| `search` | Search file contents | Plain or regex, case sensitivity, whole-word, include/exclude globs, context lines, `content`/`files`/`count` modes, binary/secret skipping |
+| `deleteFile` | Delete one file | Refuses directories, symlinks, `.git`, secrets, memory-store files; `dryRun` |
+| `mkdir` | Create a directory | Recursive, idempotent, write-permission checked |
+| `deleteDir` | Delete a directory recursively | Cannot delete the workspace root; `dryRun` lists entries first |
+
+### 7.3 Code tools (9)
+
+| Tool | What it does | Notable behaviour |
+| --- | --- | --- |
+| `runCommand` | Run an allowlisted dev command | Argv or tokenised command, no shell, local `.bin` on PATH, scrubbed env, timeout + process-tree kill, capped tail output |
+| `runTests` | Run the project's tests or typecheck | `auto` detects the package manager and `package.json` test script (or tsconfig), extracts pass/fail counts and failure lines |
+| `gitStatus` | Inspect git state | `status`, `diff`, `diff-stat`, `log`, `show`, `branch`; staged/ref filters; read-only |
+| `explainFile` | Outline a source file | Imports, exports, functions, classes, methods, interfaces, types, line ranges; TypeScript/JavaScript detail, Python, generic fallback |
+| `refactor` | Cross-file find-and-replace | Dry-run by default, glob include/exclude, per-file counts and previews, atomic writes, permission checked |
+| `benchmark` | Time a command repeatedly | Warmup runs, mean/median/min/max/p95/stddev, failure detection |
+| `createTool` | Create a workspace tool | Writes `tools/foundry/<name>.ts`, refuses overwrite, validates `tool({ execute })` shape, optional typecheck when a tsconfig exists |
+| `listWorkspaceTools` | Discover foundry tools | Name, path, description, size, mtime |
+| `callWorkspaceTool` | Execute a foundry tool | Dynamic `file://` import, JSON arguments, structured error reporting |
+
+### 7.4 Research tools (3)
+
+`webFetch`, `extractData`, and `summarize` provide web retrieval and extraction. They are registered as research tools and are available in all three modes. They are separate from the memory engine's governance; the agent should treat fetched content as untrusted evidence.
+
+### 7.5 Memory tools (12, from `@workspace/memory`)
+
+| Read | Write | Destructive |
+| --- | --- | --- |
+| `recall` | `remember` | `forgetMemory` |
+| `getRelatedMemories` | `linkMemories` | |
+| `getMemoryHistory` | `updateMemory` | |
+| `loadSkills` | `teach` | |
+| `getRecent` | `teachSkill` | |
+| | `useSkill` | |
+
+### 7.6 Mode surface (actual counts)
+
+| Mode | Tools | Composition |
+| --- | ---: | --- |
+| `Chat` | 8 | 5 memory read + 3 research |
+| `Plan` | 14 | 6 read (`listFiles`, `readFile`, `search`, `explainFile`, `listWorkspaceTools`, `callWorkspaceTool`) + 5 memory read + 3 research |
+| `Auto` | 32 | 6 read + 11 write/code + 12 memory + 3 research |
+
+The memory tool split is intentional. Chat and Plan can recall, but cannot call `remember`, `linkMemories`, `updateMemory`, `teach`, `teachSkill`, or `useSkill`; `forgetMemory` is destructive and additionally requires host confirmation.
+
+### 7.7 Workspace and file safety
+
+- Default workspace root: `~/.nimo` (`os.homedir()`), overridable with `AGENT_WORKSPACE`.
+- Paths are resolved inside the root. Traversal (`../`), absolute paths outside the root, NUL bytes, and symlink escapes are rejected.
+- `.env*`, private keys, credentials, `.npmrc`, `.netrc`, service-account JSON, and similar files are blocked from read and write.
+- `.git`, the memory store, and the database files are protected from file-tool writes.
+- Binary files are detected by a NUL-byte sample and are not silently decoded.
+- The walker skips `node_modules`, `.git`, `dist`, `build`, `.next`, `.turbo`, coverage, virtual environments, and other generated trees.
+
+### 7.8 Process safety
+
+`runCommand`, `runTests`, `gitStatus`, and `benchmark` share one hardened process runner:
+
+- **Allowlisted executables** — git, node, npm, pnpm, yarn, bun, tsx, tsc, vitest, jest, eslint, prettier, next, vite, turbo, esbuild, webpack, rollup, Python, Go, Rust, Java, .NET, and a few read-only shell basics. Extend with `AGENT_SHELL_ALLOW`.
+- **No shell interpolation** — commands are tokenised into an argv array. `&&`, `||`, `|`, `;`, `>`, `>>`, and `<` as standalone tokens are rejected. Use the dedicated search/read/write tools instead of pipelines.
+- **Windows `.cmd` shims** — the runner resolves the absolute executable path and passes it to `cmd.exe`, so npm/pnpm shims keep their `%~dp0` install directory. Environment-variable expansion (`%VAR%`), literal quotes, NUL, and line breaks are rejected.
+- **Scrubbed environment** — API keys and credentials never reach child processes. Only PATH, home directories, temp, locale, and similar non-secret variables are kept.
+- **Deterministic output** — `CI=1`, `NO_COLOR=1`, `FORCE_COLOR=0`, `GIT_PAGER=cat`, `PAGER=cat`.
+- **Timeout and process-tree kill** — a hard timeout kills the child and its descendants, so a hung build does not hang the agent.
+- **Bounded output** — per-stream byte caps keep the tail, preserving the part where errors usually appear.
+
+### 7.9 Permissions
+
+Filesystem writes and shell execution are gated by the request-scoped mode:
+
+```ts
+// packages/agents/src/tools/shared/permissions.ts
+canWriteFiles()  // AGENT_ALLOW_WRITE=true OR active mode === "Auto"
+canRunShell()    // AGENT_ALLOW_SHELL=true OR active mode === "Auto"
+```
+
+The mode comes from the memory runtime context established by `runAgent()`. `AGENT_ALLOW_WRITE` and `AGENT_ALLOW_SHELL` remain explicit overrides for CLI or test runs where no agent context exists. Tools call `assertCanWrite()` / `assertCanRunShell()` at execution time, so a model cannot talk its way into a write by pretending to be in Auto mode.
+
+### 7.10 Tool foundry and its trust boundary
+
+`createTool` writes an ordinary TypeScript file under `<workspace>/tools/foundry/`. `listWorkspaceTools` discovers it; `callWorkspaceTool` imports it through `pathToFileURL()` (required on Windows) and invokes its `execute` function.
+
+Important boundary: **foundry tools are trusted code with Node privileges.** They are not executed inside a separate VM or permission sandbox. `createTool` validates the expected shape and optionally typechecks when the workspace has a `tsconfig.json`, but a malicious tool can still do anything the agent process can do. Only create foundry tools from trusted prompts or review the generated file before calling it.
+
+The foundry is a convenience for capturing repeated operations, not a security boundary.
+
+---
+
+## 8. Limitations and Non-Claims
+
+1. **The benchmark is not blind.** The retrieval and universal corpora were authored alongside the system. The numbers are regression evidence, not an independent evaluation.
+2. **The graph does not beat the non-graph hybrid on the current corpus.** Both achieve 100% Recall / 1.000 MRR. Multi-hop value is plausible and structurally supported, but not demonstrated here.
+3. **Embeddings are hashed char n-grams, not dense vectors.** They are deterministic and dependency-free. A dense embedding model would likely improve paraphrase retrieval, at the cost of an external service or model download.
+4. **Conflict detection is heuristic.** Nuanced prose contradictions can be missed. There is no NLI judge.
+5. **Evolution is conservative, not fully autonomous.** Supersession requires an explicit correction or verified replacement. Some phrasings will not trigger it.
+6. **PAME does not implement authentication.** It consumes an identity supplied by the host. `PAME_MULTI_USER=true` makes a missing identity a hard denial, but login, sessions, and token verification are the host's responsibility.
+7. **The tool sandbox is not a VM.** It blocks traversal, secrets, shell metacharacters, and dangerous commands, but the workspace and its package scripts are trusted code. Do not run it against an untrusted repository.
+8. **Foundry tools are trusted code.** `callWorkspaceTool` runs them with full Node privileges.
+9. **Robotics is a substrate, not a robot.** `sensor`, `trajectory`, `hypothesis`, and `experiment` nodes exist; there is no simulator, controller, or physical embodiment.
+10. **Working memory is approximate.** There is no dedicated working-memory type; ephemeral retention plus recent experiences approximate it.
+11. **No concurrency stress test.** SQLite serialises writes in this single-process design, but an explicit two-writer timestamp test is not present.
+12. **No dashboard.** Jobs, audit, and revisions are observable through the database and tests, not through an operations UI.
+
+---
+
+## 9. Reproducing the Results
+
+```bash
+# Install
+pnpm install
+
+# Typecheck all packages
+pnpm typecheck
+
+# Memory suites (AGI, Dreamer, Formula, Capture, Evolution, Hardening, retrieval)
+pnpm --filter @workspace/memory test:all
+
+# Universal 6-axis suite
+pnpm --filter @workspace/memory test:universal
+
+# Individual suites
+pnpm --filter @workspace/memory test
+pnpm --filter @workspace/memory test:dreamer
+pnpm --filter @workspace/memory test:formula
+pnpm --filter @workspace/memory test:capture
+pnpm --filter @workspace/memory test:evolve
+pnpm --filter @workspace/memory test:hardening
+pnpm --filter @workspace/memory test:benchmark
+```
+
+Tests use isolated temporary databases. They must never touch the real `~/.nimo/pame.db`.
+
+To point a manual run at a disposable workspace and database:
+
+```bash
+AGENT_WORKSPACE=.tmp/pame-test \
+PAME_DB_PATH=.tmp/pame-test/pame.db \
+pnpm --filter @workspace/server dev
+```
+
+---
+
+## 10. Repository Layout, Setup, and Run
+
+### 10.1 Prerequisites
 
 | Tool | Version | Notes |
 | --- | --- | --- |
@@ -44,27 +669,22 @@ Built with TypeScript, the Vercel AI SDK, and a single-file SQLite memory (PAME)
 | pnpm | `11.25.0` | `packageManager` in root `package.json` |
 | Bun | `>=1.3.0` | Only for the CLI (`apps/cli`) |
 
-## Install
+### 10.2 Install and build
 
 ```bash
 pnpm install
-```
-
-This is a pnpm + Turborepo workspace. Root scripts are Turbo passthroughs:
-
-```bash
 pnpm build        # turbo build
-pnpm dev          # turbo dev (runs every package's dev task)
-pnpm lint         # turbo lint
-pnpm typecheck    # turbo typecheck
+pnpm dev          # turbo dev
+pnpm lint
+pnpm typecheck
 ```
 
-## Configuration
+### 10.3 Configuration
 
 The server validates its environment with Zod at startup (`apps/server/src/lib/env.ts`). Create `apps/server/.env`:
 
 ```dotenv
-# Required: must be one of the model IDs in packages/agents/src/models/registry.ts
+# Required: one of the model IDs in packages/agents/src/models/registry.ts
 AI_MODEL=anthropic/claude-sonnet-4-5
 
 # Provider key(s) — set only the one(s) you use
@@ -83,86 +703,35 @@ HOST=127.0.0.1
 
 | Variable | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `AI_MODEL` | Yes | — | Model ID used when a request omits `modelId`. Example: `anthropic/claude-sonnet-4-5` |
-| `PORT` | No | `4000` | Server port (see `apps/server/src/lib/env.ts`) |
+| `AI_MODEL` | Yes | — | Model used when a request omits `modelId` |
+| `PORT` | No | `4000` | Server port |
 | `HOST` | No | `127.0.0.1` | Server host |
-| `ANTHROPIC_API_KEY` | If using Anthropic models | — | |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | If using Google models | — | |
-| `OPENAI_API_KEY` | If using OpenAI models | — | |
-| `DEEPSEEK_API_KEY` | If using DeepSeek models | — | |
-| `GROQ_API_KEY` | If using Groq models | — | |
-| `OPENROUTER_API_KEY` | If using OpenRouter models | — | |
-| `PAME_OWNER_ID` | No | `local` | Memory owner scope |
-| `AGENT_WORKSPACE` | No | see [Workspace model](#workspace-model) | Workspace + `pame.db` location |
-| `PAME_DATA_DIR` | No | — | Fallback for the memory DB root |
+| provider keys | If used | — | Only the provider you use |
+| `PAME_OWNER_ID` | No | `local` | Local-dev owner scope |
+| `AGENT_WORKSPACE` | No | `~/.nimo` | Workspace root; also used for the default DB root |
+| `PAME_DATA_DIR` | No | — | Fallback DB root |
+| `PAME_DB_PATH` | No | `<root>/pame.db` | Exact database file |
+| `PAME_MULTI_USER` | No | unset | Set `true` to require an authenticated owner |
+| `AGENT_ALLOW_WRITE` | No | unset | Force-enable file writes outside Auto mode |
+| `AGENT_ALLOW_SHELL` | No | unset | Force-enable shell tools outside Auto mode |
+| `AGENT_SHELL_ALLOW` | No | unset | Comma-separated extra allowlisted executables |
 
-API keys live in the server process only. Shell tools run with a scrubbed env (`safeEnv()` in `packages/agents/src/tools/shared/workspace.ts`) — child processes never inherit your keys.
+Supported model IDs are defined in `packages/agents/src/models/registry.ts`. Effort levels: `none | low | medium | high`.
 
-### Supported models (`ModelId`)
-
-Defined in `packages/agents/src/models/registry.ts`:
-
-- `anthropic/claude-sonnet-4-5`
-- `google/gemini-2.5-flash`, `google/gemini-3.1-flash-lite`, `google/gemma-4-26b`
-- `openai/gpt-4.1`
-- `deepseek/deepseek-chat`
-- `groq/llama-3.3-70b-versatile`
-- `openrouter/auto`, `openrouter/free`, `openrouter/qwen3-coder-free`, `openrouter/gemini-2.5-flash`
-- `ollama/gemma4:e4b` (local, no key)
-
-Effort levels: `none | low | medium | high`.
-
-## Run
-
-### Server (the working entrypoint)
+### 10.4 Server
 
 ```bash
-# from the repo root
 pnpm --filter @workspace/server dev
+# http://127.0.0.1:4000
 
-# or from apps/server
-cd apps/server
-pnpm dev
-```
-
-Runs `tsx watch src/index.ts`. Default endpoint: `http://127.0.0.1:4000`
-
-Production:
-
-```bash
 pnpm --filter @workspace/server build
 pnpm --filter @workspace/server start
 ```
 
-### CLI
+Endpoints:
 
-```bash
-pnpm --filter @workspace/cli dev
-# = bun run --watch src/index.tsx (in apps/cli) — requires Bun
-```
-
-### Web
-
-```bash
-pnpm --filter web dev
-# = next dev (in apps/web)
-```
-
-## API
-
-Base: `http://127.0.0.1:4000` (override with `PORT` / `HOST`).
-
-### `GET /health`
-
-```bash
-curl http://127.0.0.1:4000/health
-```
-
-```json
-{ "success": true, "service": "Nimo-api", "status": "healthy", "timestamp": "2026-11-08T04:07:00.000Z" }
-```
-
-### `POST /agent`
+- `GET /health` — liveness and service name.
+- `POST /agent` — run the agent.
 
 ```bash
 curl -X POST http://127.0.0.1:4000/agent \
@@ -170,13 +739,11 @@ curl -X POST http://127.0.0.1:4000/agent \
   -d '{"prompt":"Fix the failing test","mode":"Auto","effort":"medium"}'
 ```
 
-Request schema (`apps/server/src/modules/agent/agents.schema.ts`):
-
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `prompt` | string (1–10000 chars) | Yes | |
 | `mode` | `"Chat" \| "Plan" \| "Auto"` | No | Default `"Chat"` |
-| `modelId` | `ModelId` | No | Defaults to `AI_MODEL` env |
+| `modelId` | `ModelId` | No | Defaults to `AI_MODEL` |
 | `effort` | `"none" \| "low" \| "medium" \| "high"` | No | Default `"medium"` |
 
 Response:
@@ -187,340 +754,66 @@ Response:
 
 Errors return `{ "success": false, "error": "..." }` with `400` (invalid request / model not configured) or `500` (provider / execution error).
 
-## How it works
+### 10.5 CLI and web
 
-```
-You type  →  CLI / HTTP  →  runAgent()  →  LLM + tools
-                                           ↕
-                                     Memory (PAME) — pame.db
-                                     ┌──────────────────────────────┐
-                                     │ memories · memory_edges ·    │
-                                     │ experiences · skills · audit │
-                                     └──────────────────────────────┘
-```
+- **CLI** (`apps/cli`) — OpenTUI terminal UI, run with `pnpm --filter @workspace/cli dev` (Bun). The UI shell renders, but the send path is not wired to `runAgent()` yet.
+- **Web** (`apps/web`) — Next.js starter shell. It is not yet wired to the agent API.
+- **Server** is the complete, working entrypoint.
 
-### The memory (the brain)
+### 10.6 Monorepo structure
 
-PAME is **not** a chat history and **not** a vector bag. It's:
-
-- **One continuous stream** — experiences → memories → skills. No sessions, no buckets, never bound per conversation.
-- **Retrieved by meaning** — BM25 keyword + char n-gram embeddings + entity + spreading activation, fused by **Reciprocal Rank Fusion (RRF, k=60)**.
-- **Actuated by formulas** — `A(v) = S + λ·Σ w·A(u)`, `s(t) = s₀/(1 + age/τ)`, `cos(u,v) = u·v/(‖u‖‖v‖)`, `UCB = μ + √(2 ln t / n)`.
-- **Autonomous** — every turn is recorded as "Did: …"; when no skill fired, the experience is *distilled into a candidate skill*. Skills are rehearsed (`useSkill`), promoted on success, faded on failure, archived when harmful — like a toddler learning by doing.
-- **Teachable** — `teach` plants durable lessons; `teachSkill` plants reusable procedures. Researchers grow the brain.
-- **Governed** — secrets, credentials, `.git`, and cross-owner leakage are blocked by policy; every mutation is audited.
-
-Storage: `pame.db` (SQLite, WAL, owner-scoped). Tables: `experiences`, `memories`, `memory_edges`, `memory_entities`, `memory_policies`, `memory_revisions`, `memory_audit`, `memory_jobs`, `skills`.
-
-### Skills (the unit of learning)
-
-A **skill** is a procedure with a track record: name, when-to-use, steps, tools, use/success/failure counts, confidence. It is loaded automatically when relevant, strengthens with rehearsal, composes into macro-skills (chunking, overlap ≥ 0.6), and is selected by a bandit UCB so the brain *chooses* like a robot.
-
-## Modes & tools
-
-Mode gates the tool surface (`packages/agents/src/core/tools/tools-mode.config.ts`). Every mode still learns and remembers.
-
-| Mode | Write / shell | Tools |
-| --- | --- | --- |
-| `Chat` | No | Memory (12) + Research (3) = **15** |
-| `Plan` | No (read-only) | Read (6) + Memory (12) + Research (3) = **21** |
-| `Auto` | Write yes, shell via `runCommand` tool | Read (6) + Write (11) + Memory (12) + Research (3) = **32** |
-
-Full 32-tool surface in `Auto` (`packages/agents/src/tools/index.ts`):
-
-- **Filesystem (8):** `listFiles`, `readFile`, `writeFile`, `editFile`, `search`, `deleteFile`, `mkdir`, `deleteDir`
-- **Code (9):** `runTests`, `explainFile`, `refactor`, `runCommand`, `gitStatus`, `benchmark`, `createTool`, `listWorkspaceTools`, `callWorkspaceTool`
-- **Research (3):** `webFetch`, `extractData`, `summarize`
-- **Memory (12):** `remember`, `recall`, `linkMemories`, `updateMemory`, `forgetMemory`, `getRelatedMemories`, `getMemoryHistory`, `teach`, `teachSkill`, `useSkill`, `loadSkills`, `getRecent`
-
-## Tool foundry
-
-The agent can write its own tools — the same gap → distill → rehearse loop, for tools (`packages/agents/src/tools/code/tool-foundry.ts`):
-
-```
-createTool(name, description, code)
-  → writes tools/foundry/<name>.ts under the workspace (AGENT_WORKSPACE)
-  → type-checks with `bunx tsc --noEmit --noErrorTruncation <file>`
-  → if it fails, deleted and reported; if it passes, accepted
-listWorkspaceTools → discovers all workspace-created tools by name
-callWorkspaceTool(name, args) → dynamic import via file:// URL → execute(args)
-```
-
-- Existing name → returns the existing tool instead of overwriting (no `name2` sprawl).
-- Windows dynamic import uses `pathToFileURL()` — bare filesystem paths throw `ERR_INVALID_URL`.
-
-## Workspace model
-
-- The agent runs inside a workspace directory. File tools are sandboxed to it; secrets / `.git` / memory internals are blocked.
-- Memory lives in `pame.db` beside the workspace — WAL, owner-scoped, audited.
-- Override with `AGENT_WORKSPACE` (or `PAME_DATA_DIR`). The code default in `packages/memory/src/storage/db.ts` and `packages/agents/src/tools/shared/workspace.ts` is currently a hardcoded Windows path (`C:\Users\Himanshu Arodia\.nimo`) — set `AGENT_WORKSPACE` for portable use.
-
-```bash
-AGENT_WORKSPACE=.tmp/pame-test pnpm --filter @workspace/server dev
-```
-
-## Monorepo structure
-
-```
+```text
 apps/
-  cli/       # OpenTUI terminal UI (@workspace/cli) — `bun run --watch src/index.tsx`
-  server/    # Express API wrapping runAgent() (@workspace/server) — PORT 4000 by default
-  web/       # Next.js 16 app (web) — uses @workspace/ui
+  cli/       # OpenTUI terminal UI (@workspace/cli)
+  server/    # Express API wrapping runAgent() (@workspace/server)
+  web/       # Next.js 16 app (web)
 packages/
-  agents/    # runAgent() — tool-using runtime + tool registry + models
-  memory/    # PAME — graph-organized hybrid-retrieval memory engine
+  agents/    # runAgent() runtime, models, and the tool layer
+  memory/    # PAME memory engine, storage, retrieval, governance, workers
   ui/        # Shared UI components (@workspace/ui)
-  eslint-config/      # Shared ESLint presets
-  typescript-config/  # Shared TS configs
+  eslint-config/
+  typescript-config/
 ```
 
-Memory internals (`packages/memory/src/`): `domain/` (types), `storage/` (SQLite), `retrieval/` (`search`, `rank`, `rrf`, `activate`, `embed`, `assemble`), `ingestion/` (`capture`, `consolidate`, `extract`, `ingest`, `validate`), `graph/` (`link`, `traverse`, `evolve`, `planner`), `skills/` (`distill`, `bandit`, `compose`), `governance/` (`audit`, `forget`, `policy`), `workers/` (`dreamer`, `ingestion`, `maintenance`, `curiosity`), `evals/`.
+Memory internals (`packages/memory/src/`):
 
-## Testing
-
-Memory package has real test runners (most packages stub `test` as a no-op):
-
-```bash
-pnpm --filter @workspace/memory test
-pnpm --filter @workspace/memory test:dreamer
-pnpm --filter @workspace/memory test:benchmark
-pnpm --filter @workspace/memory test:formula
-pnpm --filter @workspace/memory test:capture
-pnpm --filter @workspace/memory test:all
+```text
+domain/        pure types; no DB, HTTP, or SDK imports
+storage/       SQLite schema, repositories, indexes
+retrieval/     search, rank, rrf, activate, embed, assemble
+ingestion/     capture, consolidate, extract, ingest, validate
+graph/         link, traverse, evolve, conflict, planner
+skills/        distill, bandit, compose
+governance/    policy, forget, audit
+workers/       dreamer, ingestion, maintenance, curiosity
+evals/         retrieval benchmark, universal benchmark
 ```
 
-## Research
+The research lab lives in `packages/memory/nimo/`: `neurons/`, `synapses/`, `cortex/`, `learning/`, `recall/`, `skills/`, `memory-arena/`, `papers/`, `experiments/`, and `benchmarks/`.
 
-The lab lives in [`packages/memory/nimo/`](packages/memory/nimo/): `neurons/`, `synapses/`, `cortex/`, `learning/`, `recall/`, `skills/`, `memory-arena/`, `papers/` (A-MEM, HippoRAG, AgeMem, robotics memory 2025-2026), `experiments/`, `benchmarks/`.
+---
 
-Start with [`packages/memory/nimo/papers/README.md`](packages/memory/nimo/papers/README.md) — one file per paper: what it says, what Nimo takes from it, and where Nimo diverges.
+## 11. Status
 
-## Status
+| Component | Status | Notes |
+| --- | --- | --- |
+| Memory engine (PAME) | **Implemented and verified** | SQLite, hybrid retrieval, governance, deletion, jobs, skills; 314/314 checks |
+| Retrieval benchmark | **Implemented, limited** | 18 questions; synthetic, not blind |
+| Universal benchmark | **Implemented, limited** | 62 questions / 6 axes; 100%; synthetic, not blind |
+| Server | **Working entrypoint** | Express API, `POST /agent` |
+| Agent tool layer | **Upgraded** | 20 non-memory tools + 12 memory tools; sandboxed file/process execution |
+| CLI | **Scaffold** | UI shell; send path not wired |
+| Web | **Scaffold** | Next.js shell; not wired |
+| Dense embeddings / reranker / graph DB | **Unsupported** | Deliberately out of scope |
+| Authentication | **Host responsibility** | PAME consumes host-provided identity |
+| Robotics embodiment | **Substrate only** | Typed nodes/edges; no simulator or controller |
 
-- **Server** — the complete, working entrypoint. Start here.
-- **CLI** — UI scaffold in `apps/cli`: `InputBar` + command menu render, but `ChatArea` is a placeholder and `handleSend` in `src/index.tsx` is currently an empty stub — the CLI does not call `runAgent()` yet.
-- **Web** — starter shell (`apps/web` + `@workspace/ui`); not yet wired to the agent API.
+---
 
-## Full PAME research notes
+## 12. Contributing, Security, and License
 
-> The long-form notes below are preserved from the original README. The short summaries above are the source of truth for commands, ports, and API; this section is the design / experiment record.
+**Contributing.** See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the pull-request process. The CLI actually lives in `apps/cli`; use `pnpm --filter @workspace/cli dev` (the contributor guide may mention an older path).
 
-<details>
-<summary>Click to expand the full PAME paper</summary>
+**Security.** Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md). Do not run the agent against untrusted repositories: the tool sandbox prevents traversal and shell injection, but package scripts, foundry tools, and checked-out code are trusted code with process privileges.
 
-### Abstract
-
-We present **PAME (Nimo Associative Memory Engine)**, a human-like, graph-organized, hybrid-retrieval memory system that inside a large language model's agentic loop grows **capability**, not just history. Unlike vector-bag agent memory, PAME's unit of learning is a **skill**: a procedure with an evidence track record (use/success/failure counts, confidence, recency ageing). Skills are **autonomously distilled from gaps** (toddler-style learning), **rehearsed**, and **curated** (promote/demote/archive) by a multi-armed bandit over their own outcomes. Retrieval fuses four independent rankings — BM25 keyword, entity, char n-gram embedding cosine, and spreading activation — by **Reciprocal Rank Fusion (RRF)**. The entire system runs in a single SQLite file (WAL, owner-scoped, audited) with zero dependencies beyond a deterministic hashing embedding. We show empirically that memory recall is *gist-based* (morphological relatives fire), that the autonomy loop closes in live runs, and that a robot/bench simulation swapping in a reward score reuses the identical substrate to learn to walk, tune a jet component, or optimize a protein — any simulatable, scoreable task.
-
-### 1. Introduction
-
-Agent memory is usually a spreadsheet. Agents "remember" by storing text in a vector bag and retrieving by similarity; they forget on a timer; they never get better at *doing* anything. Human memory is different: it is **associative** (a thought reminds you of another), **decaying** (unused fades), and **procedural** (a skill you rehearsed stays even when the facts fade).
-
-PAME borrows that shape. It has one continuous stream of experience, no sessions, and a brain that grows by **doing**, not by being told. The design constraint is strict: everything must be runnable in plain SQLite with deterministic, testable code — no hidden API, no embedding server.
-
-### 2. Related work
-
-PAME is situated in the line of dynamic-memory agents:
-
-- **A-MEM (NeurIPS 2025)** — dynamic memory notes, automatic linking, memory evolution. The closest foundation for the neuron/edge model.
-- **HippoRAG (NeurIPS 2024)** — knowledge graph + Personalized PageRank, multi-hop retrieval. The inspiration for spreading activation (`A(v) = S + λΣwA(u)`).
-- **AgeMem (ACL 2026)** — memory-management operations (store/retrieve/update/discard) as agent actions, with autonomous governance.
-- **Robotics episodic memory (2025-2026)** — humanoid robots' world models: one continuous stream, graph associations, outcome-weighted skills, continual substrate updating without retraining the base model. PAME is the cognitive core of that pattern.
-
-Our delta: PAME makes **skill distillation** the first-class learning primitive — toddler-style gap → candidate → rehearsal → curated — so the system compounds *capability* across turns and across unrelated tasks.
-
-### 3. System architecture
-
-```
-User turn
-  → recall (RRF over BM25 · entity · embed · graph)     ← firing by gist
-  → loadSkills (success-rate × recency)                  ← muscle memory
-  → context block: "What we are doing now (newest first)" + skills + memories
-  → LLM + tools (26 tools: filesystem · code · research · memory)
-  → record "Did: …" (experience) + tool outcomes
-  → [gap?]  distill → candidate skill   OR   [skills present?]  evolveSkills
-```
-
-Storage: `pame.db` (SQLite, WAL). Tables: `experiences`, `memories`, `memory_edges`, `memory_entities`, `memory_policies`, `memory_revisions`, `memory_audit`, `memory_jobs`, `skills`. Owner-scoping on every query. Secrets/credentials blocked by policy.
-
-### 4. The learning loop
-
-#### 4.1 Experience (capture)
-Every prompt and every "Did: …" is written as an `Experience` with a SHA-256 content hash for dedupe. Provenance is never invented: if the memory block is empty, the model is told explicitly *"No prior activity recorded"* and must not claim a previous turn.
-
-#### 4.2 Consolidation (neurons)
-Candidates are extracted (rule-based regex/heuristic, no LLM — deterministic and testable), validated against governance (secrets, inferred, capture-enabled), then consolidated:
-
-- **Exact/near-exact duplicate** → attach new evidence, bump confidence/importance, record a revision (history is never silently rewritten).
-- **Keyword-overlap duplicate** (same type, ≥ 40% overlap, long content) → same merge path.
-- **Otherwise** → create a new neuron with a `related_to`/`supports`/`depends_on` synapse to the closest active memory.
-
-#### 4.3 Distillation (toddler-skill creation)
-If no loaded skill fired for the prompt — a **gap** — the turn is distilled into a candidate skill (`distillSkill`):
-
-```
-name        = first 4 words of the prompt, slugified
-steps       = numbered lines from the response (2–6 steps)
-toolsUsed   = tools the agent actually called this turn
-keywords    = stopword-filtered content words
-confidence  = 0.35 (young candidate)
-status      = candidate → active only after its first success
-```
-
-Duplicates are suppressed; policy gates secrets. **No human curates this** — the brain grows on its own, exactly like a toddler who stringifies taught lines into a whole drawing.
-
-#### 4.4 Rehearsal & the bandit (world-model-lite)
-After using a skill, `useSkill(success)` updates:
-
-```
-uses += 1;  successes += success?1:0;  failures += success?0:1
-confidence = successes / uses
-lastAccessedAt = now        ← rehearsal refreshes ageing
-```
-
-Each skill is an *arm* of a multi-armed bandit. Outcomes update a Beta posterior; **UCB** picks the arm the brain tries next:
-
-```
-α = 1 + successes,   β = 1 + failures
-μ = α / (α + β)
-UCB = μ + √(2 ln t / n)          t = total uses,  n = uses of this arm
-```
-
-That's the reward model a robot uses to choose a gait — running on pure arithmetic.
-
-#### 4.5 Curation (evolveSkills)
-Every turn with skills present runs the lifecycle:
-
-| Condition | Action |
-| --------- | ------ |
-| candidate + ≥ 1 success | → **promoted to active** |
-| active + failures ≥ 3 and success < failures | → **archived** |
-| active + success < failures and confidence < 0.4 | → **demoted to candidate** |
-| otherwise | kept |
-
-### 5. Retrieval — firing by gist
-
-#### 5.1 Four rankings, fused by RRF
-1. **BM25 keyword** — `score += idf · (f·(k₁+1)) / (f + k₁(1−b+b·docLen/avgLen))`, k₁=1.5, b=0.75. Deterministic, no server.
-2. **Entity** — exact entity-name matching.
-3. **Embedding cosine** — `cos(u,v) = u·v/(‖u‖‖v‖)` on hashed char n-gram vectors (dim 256), which makes morphological relatives share buckets the way semantic neurons do ("automobile" ≈ "automobiles").
-4. **Graph activation** — spreading activation (below).
-
-Fused by **Reciprocal Rank Fusion**: `RRF(d) = Σ 1/(60 + rankᵢ(d))`.
-
-#### 5.2 Spreading activation
-```
-A(v) = S(v,q) + λ · Σ w(u,v)·A(u)      with λ = 0.5, per-hop decay 0.6
-```
-Bounded hops (≤ 4), no runaway re-visits. Connected memories that share *no words* with the query can still surface — the thought reminds you of another thought, as in human recall and HippoRAG's Personalized PageRank.
-
-#### 5.3 Ageing — the forgetting curve
-```
-s(t) = s₀ / (1 + age/τ)    with τ = 30 days × (1 + importance)
-```
-A memory decays with age since last access; **use refreshes it**. Rehearsed skills stay bright; neglected ones fade. Human forgetting, encoded.
-
-#### 5.4 Surfaced newest-first
-Recall is newest-first (recency bias): among equally relevant memories, the most recent surfaces first — like human recall, and like humanoid robots surfacing their most recent observations.
-
-### 6. Composition — brain chunking
-Two active, confident skills compose into a macro-skill when they share keywords:
-
-```
-chunkedSteps(A,B) = steps(A) ⊕ steps(B)
-   if |keywords(A) ∩ keywords(B)| / |keywords(A) ∪ keywords(B)| ≥ 0.6
-   and confidence(A) ≥ 0.6 and confidence(B) ≥ 0.6
-```
-
-This is chunking: a repeated sequence ("read error → patch → test") is compressed into one neuron. Researcher-taught primitives bind into larger, *fireable* procedures.
-
-### 7. Experiments & results (live runs, 2026-11-07)
-
-- **Gist recall.** Query "automobile" → BM25 scores 1.00 on "vehicles are cars trucks automobiles" (shared "automobile" stem via char n-grams), cosine 0.356 vs. the plant memory's 0.072 → plant excluded by the 0.15 gist threshold. Cosine "cat dog pet" vs. "pet dog" = 0.71; vs. "rocket spaceship" = 0.
-- **RRF.** `[m1,m2,m3] + [m2,m1] + [m3,m1]` → top-ranked `m1`.
-- **Bandit.** Arms `good(8 successes / 1 failure)` vs. `bad(1 / 8)` → UCB picks `good`.
-- **Memory is real.** The live database at `~/.nimo/pame.db` held 3 skills (`fix-test` ×2, `how-do-i-fix` — the last *autonomously distilled* from a response, never taught), 2 memories across unrelated facts, and 3 audit rows. A subsequent "remember({content: 'ok'})" returned `created: 1` — the loop closes.
-- **Turn-level behaviour.** With the brain loaded (`inputTokens 12,432`, `cacheReadTokens 6,000`), the agent answered "Hello Asur…" — using the user's name from turn 1 instead of hallucinating an intro — and closed its turn with a summary (`textTokens 40` after closing instruction). The empty-text fallback never fired.
-- **Tool surface.** 32 tools in Auto mode (filesystem, code incl. `refactor`/`runCommand`/`gitStatus`/`benchmark` + the 3 foundry tools `createTool`/`listWorkspaceTools`/`callWorkspaceTool`, research, and 12 memory tools).
-
-### 8. Discussion — limitations and what's next
-
-PAME is the **cognitive core**. The honest gaps are:
-
-1. **Dense embeddings.** Hashed char n-grams are a dependency-free stand-in. A model-based embedding would lift Recall@K by points, not fractions.
-2. **The physical layer.** For robot-grade work (jet engines, proteins, walking), add `sensor`/`trajectory` nodes — command → outcome pairs — and a tiny predictor head, so it learns the *dynamics*, not just the facts. The substrate is identical; only the node types widen.
-3. **Offline dreaming.** A background worker that merges duplicates, prunes weak edges, re-ranks, and summarizes the stream hasn't been wired in yet.
-
-The substrate is task-agnostic: point the same loop at a simulation that returns `(action → outcome, reward)` and the identical machinery learns to walk, to tune a blade, or to optimize a molecule — and keeps getting better, because it keeps the winners.
-
-### 9. Conclusion
-
-PAME is not a chatbot with a database. It is a memory system that learns — and can be taught, measured, and improved. The unit of learning is a skill with a track record; the curriculum is experience; the teacher is its own rehearsal. Sessions organize interactions. Neurons organize knowledge. Synapses connect knowledge. The cortex controls what survives.
-
-### 10. Tool foundry — the brain grows its own hands
-
-The learning loop (gap → distill → rehearse → evolve) is not just for tasks; it's also for **tools**. The agent can write its own tools, verify them, and run them — exactly like it distills skills.
-
-#### 10.1 The find-foundry loop
-```
-createTool(name, description, code)
-  → writes tools/foundry/<name>.ts
-  → type-checks with pnpm exec tsc --noEmit
-  → if it fails, deleted and reported; if it passes, accepted
-listWorkspaceTools → discovers all workspace-created tools by name
-callWorkspaceTool(name, args) → dynamic import via file:// URL → execute(args)
-```
-Every turn that uses a created tool records an experience and can **distill a meta-skill about tool creation itself**.
-
-#### 10.2 Dedup + safety
-- If `createTool(name)` exists, it returns the existing tool instead of making `name2`. No duplicate sprawl.
-- Windows path handling: dynamic import requires `pathToFileURL()` — bare filesystem paths throw `ERR_INVALID_URL`.
-- Every created tool is type-checked *before* it can run; failures are reported, not silently landed.
-
-#### 10.3 Why the graph keeps it from becoming clanky
-The asked question: *"won't it get clanky as memory grows? won't it be less effective if it doesn't use the full data?"*
-
-**No, because the prompt is not the memory.**
-- **Prompt cost is constant** — 8 recalled memories max, 3 skills max, however many memories exist in SQLite.
-- **The graph does the finding.** Spreading activation walks *links*, not rows, so 5,000 memories cost the same traversal as 10.
-- **Chunking keeps procedures whole.** A 20-step walk cycle compresses into one macro-skill neuron via `overlap ≥ 0.6` composition. It's not "8 steps in the prompt" — it's one chunk.
-- **Ageing decides what's forgettable.** `s(t) = s₀/(1+age/τ)` fades what you don't use; rehearsal refreshes what you do. "Not in the prompt now" ≠ "gone forever".
-- **That's why it's better than a vector bag.** A vector bag retrieves by *similarity*; a graph retrieves through *connections*. A walk-gait that succeeded last week reminds the brain of a balancing step from last month — even if you never wrote "balancing" in the prompt. That's thought-association.
-
-#### 10.4 Tool projects (separate-project tools)
-The same foundry scales beyond a single file. A **tool project** is a folder with its own `index.ts`, `tools.ts`, tests, and README — a *separate software project* with its own tools inside:
-- `tools/projects/walk-sim/` — a 2D biped sim + `walk` tools + reward.
-- `tools/projects/jet-tuner/` — a jet-blade simulator + `tune/score/reset` tools.
-- `tools/projects/lab-bench/` — candidate → measurement tools for proteins/chemistry.
-
-Each project is **distilled as a skill** when it completes a full task ("found a better blade") and *composed* automatically when two projects share keywords (`thermal, blade, vibration` → overlap ≥ 0.6 → macro-project `jet-safe-tuner`).
-
-MCP is **not** needed for this. MCP is for *other systems* to use Nimo's tools. These are Nimo's own tools in the same `tools/` tree, registered in `tools/insex.ts` and gated by the same mode config. The LLM edits them with `writeFile`/`editFile` like any other file.
-
-#### 10.5 AGI shape
-With the tool foundry, the system is:
-- **Task-agnostic** — one core learner for code, robots, labs, driving.
-- **Autonomous** — gap → distill → rehearse → evolve, *including for tools themselves*.
-- **Compositional** — skills chunk, and projects compose via keyword overlap.
-- **Reward-driven** — UCB bandit picks by past reward.
-
-That's the AGI architecture: **a brain that learns, plus hands it makes itself**. The remaining AGI pieces are scale and grounding (dense embeddings, sensor/trajectory nodes, planner, curiosity drive) — not a new idea.
-
-</details>
-
-## Contributing
-
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, pull request process, and how to report bugs.
-
-> Note: `CONTRIBUTING.md` references `packages/cli` and `bun run dev:cli` — the CLI actually lives in `apps/cli` with `pnpm --filter @workspace/cli dev`. Use this README's commands.
-
-## Security
-
-Please report security vulnerabilities privately. See [SECURITY.md](SECURITY.md).
-
-## License
-
-Proprietary — © 2026 Himanshu Arodia. All rights reserved. See [LICENSE](LICENSE).
-Evaluation / personal non-commercial use only. No commercial use, copying,
-distribution, or resale without a written license; payment does not grant
-resale rights.
+**License.** Proprietary — © 2026 Himanshu Arodia. All rights reserved. See [LICENSE](LICENSE). Evaluation / personal non-commercial use only. No commercial use, copying, distribution, or resale without a written license; payment does not grant resale rights.

@@ -113,16 +113,19 @@ export function requireMemoryContext(): MemoryRuntimeContext {
 
 export function requirePermission(kind: "write" | "delete"): void {
   const ctx = requireMemoryContext();
+  // A delete in a write-capable mode is blocked specifically on the human
+  // confirmation flag, so callers can prompt for confirmation rather than
+  // reporting a generic permission error.
+  if (kind === "delete" && ctx.permissions.write && !ctx.destructiveConfirmed) {
+    throw new MemoryAccessError(
+      "confirmation_required",
+      "Destructive memory operations require explicit human confirmation.",
+    );
+  }
   if (!ctx.permissions[kind]) {
     throw new MemoryAccessError(
       "forbidden",
       `Memory ${kind} is not permitted in ${ctx.mode} mode.`,
-    );
-  }
-  if (kind === "delete" && !ctx.destructiveConfirmed) {
-    throw new MemoryAccessError(
-      "confirmation_required",
-      "Destructive memory operations require explicit human confirmation.",
     );
   }
 }

@@ -308,9 +308,27 @@ export function closeDb(): void {
 }
 
 /** Run `fn` atomically. Nested calls become savepoints. */
+let savepointDepth = 0;
 export function withTransaction<T>(fn: () => T): T {
   const database = getDb();
-  if (database.inTransaction) return fn();
+  if (database.inTransaction) {
+    // Real savepoint so an inner failure can roll back only its own writes
+    // while an outer caller decides whether to continue.
+    const name = `pame_sp_${++savepointDepth}`;
+    database.exec(`SAVEPOINT ${name}`);
+    try {
+      const out = fn();
+      database.exec(`RELEASE ${name}`);
+      return out;
+    } catch (err) {
+      database.exec(`ROLLBACK TO ${name}`);
+      database.exec(`RELEASE ${name}`);
+      throw err;
+    } finally {
+      savepointDepth--;
+    }
+  }
+  savepointDepth = 0;
   return database.transaction(fn)();
 }
 
@@ -363,13 +381,24 @@ function ftsUpsert(node: MemoryNode): void {
   } catch { /* FTS is an optimisation, never a source of truth */ }
 }
 
+/** Common words that carry no retrieval signal in an FTS OR-query. */
+const FTS_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "by", "for",
+  "with", "from", "is", "are", "was", "were", "be", "been", "it", "this",
+  "that", "these", "those", "i", "we", "you", "he", "she", "they", "my",
+  "our", "your", "their", "me", "us", "them", "do", "does", "did", "have",
+  "has", "had", "what", "which", "who", "whom", "when", "where", "why",
+  "how", "about", "please", "tell", "can", "could", "would", "should",
+  "there", "here", "again",
+]);
+
 /** Candidate ids from the FTS index, best first. Empty when unavailable. */
 export function searchFts(ownerId: string, query: string, limit = 200): string[] {
   if (!ftsAvailable) return [];
   const terms = query
     .toLowerCase()
     .split(/\W+/)
-    .filter((t) => t.length >= 2)
+    .filter((t) => t.length >= 2 && !FTS_STOPWORDS.has(t))
     .slice(0, 12);
   if (terms.length === 0) return [];
   const match = terms.map((t) => `"${t.replace(/"/g, "")}"`).join(" OR ");
@@ -809,6 +838,18 @@ export function deleteEdgesForMemory(memoryId: string, ownerId: string): number 
 /** Recompute graph_degree from the edge table. Idempotent repair operation. */
 export function repairGraphDegrees(ownerId: string): number {
   return withTransaction(() => {
+    // Drop edges whose endpoints no longer exist (or are soft-deleted) before
+    // recomputing, so repair also heals orphaned relationships.
+    getDb()
+      .prepare(
+        `DELETE FROM memory_edges
+         WHERE owner_id = ?
+           AND (
+             from_memory_id NOT IN (SELECT id FROM memories WHERE owner_id = ? AND status != 'deleted')
+             OR to_memory_id NOT IN (SELECT id FROM memories WHERE owner_id = ? AND status != 'deleted')
+           )`,
+      )
+      .run(ownerId, ownerId, ownerId);
     const r = getDb()
       .prepare(
         `UPDATE memories SET graph_degree = (
@@ -825,6 +866,11 @@ export function repairGraphDegrees(ownerId: string): number {
 
 export function repairAllGraphDegrees(): void {
   try {
+    getDb().exec(`
+      DELETE FROM memory_edges
+      WHERE from_memory_id NOT IN (SELECT id FROM memories WHERE status != 'deleted')
+         OR to_memory_id NOT IN (SELECT id FROM memories WHERE status != 'deleted')
+    `);
     getDb().exec(`
       UPDATE memories SET graph_degree = (
         SELECT COUNT(*) FROM memory_edges

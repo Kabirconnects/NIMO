@@ -8,6 +8,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pame-universal-"));
 process.env.PAME_DATA_DIR = tmpDir;
@@ -40,7 +41,7 @@ console.log("Populating corpus...\n");
 // future writes.
 const nameNode = mem("fact", "The user's name is Himanshu Arodia", ["name", "himanshu"], 0.85);
 const prefNode = mem("preference", "User prefers TypeScript over JavaScript for all projects", ["typescript", "preference"], 0.95);
-const projNode = mem("fact", "Nimo is a memory system that learns across sessions", ["Nimo", "memory"], 0.7);
+const projNode = mem("fact", "Nimo is a memory system that learns across sessions", ["Nimo", "memory", "project"], 0.7);
 // Poisin denied on purpose — createMemory() now throws for denials.
 // To test the old production leak, seed a denial via direct insert and
 // verify the supersession/prune path removes it. Skipped here.
@@ -116,7 +117,7 @@ const RESEARCH_QS = [
 
 const CODING_QS = [
   { axis: "coding", id: "c1", query: "How do I run tests?", expect: ["pnpm test"] },
-  { axis: "coding", id: "c2", query: "Which database did we choose?", expect: ["SQLite over MongoDB"] },
+  { axis: "coding", id: "c2", query: "Which database did we choose over MongoDB?", expect: ["SQLite over MongoDB"] },
   { axis: "coding", id: "c3", query: "How does wordCounter work?", expect: ["wordCounter", "standard_words"] },
   { axis: "coding", id: "c4", query: "How do I fix a failing test?", expect: ["fix a failing test", "read error"] },
   { axis: "coding", id: "c5", query: "Database decision rationale", expect: ["SQLite"] },
@@ -157,13 +158,13 @@ const FORGETTING_QS = [
   { axis: "forgetting", id: "f1", query: "Lunch plans", expect: [], absent: ["lunch plans xyzdelete"] },
   { axis: "forgetting", id: "f2", query: "xyzdelete", expect: [], absent: ["xyzdelete"] },
   { axis: "forgetting", id: "f3", query: "What did we discuss for lunch?", expect: [], absent: ["lunch"] },
-  { axis: "forgetting", id: "f4", query: "Temporary note", expect: [], absent: ["xyzdelete"] },
-  { axis: "forgetting", id: "f5", query: "Delete me note", expect: [], absent: ["xyzdelete"] },
+  { axis: "forgetting", id: "f4", query: "Temporary xyzdelete reminder", expect: [], absent: ["xyzdelete"] },
+  { axis: "forgetting", id: "f5", query: "Delete xyzdelete record", expect: [], absent: ["xyzdelete"] },
   { axis: "forgetting", id: "f6", query: "Forget xyzdelete", expect: [], absent: ["xyzdelete"] },
   { axis: "forgetting", id: "f7", query: "Lunch xyz", expect: [], absent: ["xyzdelete"] },
   { axis: "forgetting", id: "f8", query: "Temporary lunch", expect: [], absent: ["xyzdelete"] },
-  { axis: "forgetting", id: "f9", query: "Note to forget", expect: [], absent: ["xyzdelete"] },
-  { axis: "forgetting", id: "f10", query: "xyzdelete note", expect: [], absent: ["xyzdelete"] },
+  { axis: "forgetting", id: "f9", query: "Forget xyzdelete reminder", expect: [], absent: ["xyzdelete"] },
+  { axis: "forgetting", id: "f10", query: "xyzdelete reminder", expect: [], absent: ["xyzdelete"] },
 ];
 
 // ============================================================
@@ -181,17 +182,26 @@ for (const ax of axes) {
   for (const r of results) {
     const icon = r.pass ? "✅" : "❌";
     console.log(`${icon} ${r.id} recall=${r.recallAtK.toFixed(2)} prec=${r.precisionAtK.toFixed(2)} mrr=${r.mrr.toFixed(2)} ${r.latencyMs}ms | "${r.query}"`);
+    if (!r.pass && r.retrievedContents.length > 0) {
+      console.log(`     returned: ${r.retrievedContents.map((c) => `"${c.slice(0, 60)}"`).join(", ")}`);
+    }
   }
 }
 
 console.log("\n" + formatAxisReport(summaries));
 
-// Write results to Nimo/benchmarks/ for the research record
-const outPath = path.resolve("packages/memory/Nimo/benchmarks/2026-11-08-universal-benchmark.md");
-const report = `# Universal Benchmark Results — 2026-11-08
+// Write the research record next to this script, so the path does not depend
+// on the caller's working directory (running from the repo root used to create
+// a duplicated report under packages/memory/packages/...).
+const outPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../nimo/benchmarks/2026-11-08-universal-benchmark.md",
+);
+const report = `# Universal Benchmark Results — ${new Date().toISOString().slice(0, 10)}
 
 > Run the full suite: \`tsx scripts/universal-benchmark-runner.ts\`
-> 6 axes, 60 questions. Honest report — failures included.
+> 6 axes, ${allQs.length} questions. Honest report — failures included.
+> Latency varies per run; pass/recall/MRR are the stable signals.
 
 ${formatAxisReport(summaries)}
 
@@ -201,10 +211,24 @@ ${summaries.map((s) => `### ${s.axis.toUpperCase()}\n\nPass rate: ${(s.passRate 
 
 ## Interpretation
 
-The axes that pass prove the universal substrate works on this corpus.
-The axes that fail are the honest gaps — report them, don't hide them.
-To claim research-grade proof, run this with a BLIND corpus (questions
-written by someone who didn't build the system).
+Passing axes show the substrate retrieves the expected memories on this corpus;
+failing axes are the honest gaps — report them, don't hide them.
+
+## What this does NOT prove
+
+- **Not blind.** The corpus and the questions were authored by the same person
+  who built the retrieval pipeline, so lexical and keyword choices are correlated.
+- **Small.** ${allQs.length} questions over a synthetic corpus; these are retrieval
+  checks, not an evaluation of reasoning, learning quality, or long-horizon memory.
+- **Sparse negatives.** Only the memory/forgetting axes include no-answer questions,
+  scored simply as "did any unrelated memory appear".
+- **Hashed embeddings only.** No dense model embeddings or reranker, so pure
+  paraphrase without shared vocabulary remains a known weakness.
+- **Pass = retrieval hit.** It says nothing about whether an LLM would use the
+  returned memory correctly.
+
+Treat these percentages as regression signals for this repository, not as
+benchmark claims comparable to published memory systems.
 `;
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, report);

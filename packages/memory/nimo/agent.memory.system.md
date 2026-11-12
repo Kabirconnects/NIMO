@@ -1836,3 +1836,23 @@ That is the distinction that makes Nimo's memory independent of conversation bou
 3. [AgeMem (ACL 2026)](https://aclanthology.org/2026.acl-long.981/?utm_source=chatgpt.com) — study autonomous memory-management operations.
 
 My recommendation: Build PAME in stages 1–3 first, then add the graph in stage 4. The graph is the distinctive feature, but reliable evidence, ownership, persistence, and retrieval are what make it a usable memory system rather than an interesting demo.
+
+---
+
+## Appendix: Implementation status vs. this design document (2026-11-12)
+
+Everything above is a **design / research narrative**, not a claim that each described
+feature ships. The authoritative, test-backed status table lives in
+`agent.md` section 8a. Summary of the corrections that matter most:
+
+| Topic | Design-document claim | Actual implementation status |
+| --- | --- | --- |
+| PageRank / Personalized PageRank | Multi-factor ranking includes a PageRank term | **Removed from ranking.** The `page_rank` column is legacy data and stays 0. Ranking is 0.35 x relevance + 0.40 x (base/2) + 0.15 x recency + 0.10 x confidence; graph structure enters only through the bounded degree term. |
+| Contradiction detection | Contradictions detected and reconciled | **Partially implemented.** An explicit classifier separates similarity from contradiction (value-slot conflicts, negation, numeric/entity changes); conflicts are preserved and linked. Nuanced prose conflicts can be missed. |
+| Forgetting | Deletion removes derived notes, edges, embeddings, index entries | **Implemented.** Transactional, idempotent, verified by the hardening suite; bulk forget previews by default and never sweeps graph-only neighbours. |
+| Secret handling | No passwords / keys are stored | **Implemented** as pattern + assignment detection on every write path, with false-positive controls for words like `tokenizer`. Not a full DLP classifier. |
+| Multi-user isolation | Owner scoping enforced in the query | **Implemented** via request-scoped owner from the host server. PAME does **not** authenticate users; with `PAME_MULTI_USER=true` missing identity is denied, otherwise a deliberate local-dev owner `local` is used. |
+| Background jobs | Redis/BullMQ durable queue | **Implemented differently and honestly:** a durable SQLite `memory_jobs` table with attempts, backoff, dead-letter and stale-job recovery. No Redis dependency. |
+| Retrieval | Hybrid vector + keyword + entity + graph | **Implemented** with deterministic hashed n-gram embeddings (no model server), FTS5 when available, read-only recall, noise gating, and truncation reporting. |
+| Benchmarks | Retrieval quality measured | **Implemented but limited:** 18-question retrieval benchmark and a 62-question, 6-axis suite. Negative questions are scored by false positives. Corpora were authored alongside the system, so results are **not blind or research-grade**. |
+| Robotics | Universal substrate supports robotics | **Partially implemented:** robotic data is modelled as typed memories + the universal substrate edges. No simulator, control loop, or embodiment integration exists. |

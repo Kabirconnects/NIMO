@@ -1,0 +1,196 @@
+
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 512 512"
+     width="512" height="512"
+     fill="none">
+
+  <style>
+    * {
+      transform-box: fill-box;
+    }
+
+    .triangle {
+      stroke-dasharray: 1200;
+      stroke-dashoffset: 1200;
+      animation: draw 2s ease forwards;
+    }
+
+    .inner {
+      opacity: 0;
+      animation: reveal 1.5s ease 1.3s forwards;
+    }
+
+    .orbit {
+      transform-origin: 256px 256px;
+      animation: rotate 18s linear infinite;
+    }
+
+    .orbit2 {
+      transform-origin: 256px 256px;
+      animation: rotateBack 24s linear infinite;
+    }
+
+    .eye {
+      transform-origin: center;
+      animation: eyeOpen 1.2s ease 2.1s both,
+                 blink 5s ease-in-out 3.5s infinite;
+    }
+
+    .pupil {
+      animation: pulse 2.5s ease-in-out infinite;
+    }
+
+    .rays {
+      transform-origin: 256px 256px;
+      animation: rays 4s ease-in-out infinite;
+    }
+
+    .word {
+      opacity: 0;
+      animation: reveal 1.5s ease 2.5s forwards;
+    }
+
+    .spark {
+      animation: sparkle 2s ease-in-out infinite alternate;
+    }
+
+    @keyframes draw {
+      to { stroke-dashoffset: 0; }
+    }
+
+    @keyframes reveal {
+      to { opacity: 1; }
+    }
+
+    @keyframes rotate {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes rotateBack {
+      to { transform: rotate(-360deg); }
+    }
+
+    @keyframes eyeOpen {
+      from { opacity: 0; transform: scaleY(0.05); }
+      to { opacity: 1; transform: scaleY(1); }
+    }
+
+    @keyframes blink {
+      0%, 94%, 100% { transform: scaleY(1); }
+      96% { transform: scaleY(0.08); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+
+    @keyframes rays {
+      0%, 100% { opacity: 0.25; }
+      50% { opacity: 0.8; }
+    }
+
+    @keyframes sparkle {
+      from { opacity: 0.2; }
+      to { opacity: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; }
+      .triangle { stroke-dashoffset: 0; }
+      .inner, .word { opacity: 1; }
+    }
+  </style>
+
+  <!-- Outer orbit -->
+  <g class="orbit" stroke="white" opacity=".65">
+    <circle cx="256" cy="256" r="190"
+            stroke-width="1"/>
+    <circle cx="256" cy="66" r="4" fill="white"/>
+    <circle cx="446" cy="256" r="4" fill="white"/>
+    <circle cx="256" cy="446" r="4" fill="white"/>
+    <circle cx="66" cy="256" r="4" fill="white"/>
+  </g>
+
+  <!-- Secondary orbit -->
+  <g class="orbit2" stroke="white" opacity=".4">
+    <ellipse cx="256" cy="256" rx="215" ry="95"
+             stroke-width="1"/>
+    <circle cx="256" cy="161" r="3" fill="white"/>
+  </g>
+
+  <!-- Radiating energy -->
+  <g class="rays" stroke="white" stroke-width="1"
+     opacity=".5">
+    <path d="M256 65 V105 M256 407 V447
+             M65 256 H105 M407 256 H447
+             M120 120 L150 150
+             M392 120 L362 150
+             M120 392 L150 362
+             M392 392 L362 362"/>
+    <path d="M256 35 L256 90
+             M256 422 L256 477
+             M35 256 H90 M422 256 H477"/>
+  </g>
+
+  <!-- Main pyramid -->
+  <path class="triangle"
+        d="M256 75 L440 390 H72 Z"
+        stroke="white"
+        stroke-width="3"
+        stroke-linejoin="round"/>
+
+  <!-- Inner pyramid -->
+  <path class="inner"
+        d="M256 125 L395 365 H117 Z"
+        stroke="white"
+        stroke-width="1.5"/>
+
+  <!-- All-seeing eye -->
+  <g class="inner">
+    <path d="M160 235 Q256 150 352 235
+             Q256 320 160 235Z"
+          stroke="white" stroke-width="3"/>
+
+    <g class="eye">
+      <circle cx="256" cy="235" r="37"
+              stroke="white" stroke-width="2"/>
+      <circle class="pupil" cx="256" cy="235"
+              r="16" fill="white"/>
+      <circle cx="256" cy="235" r="6"
+              fill="black"/>
+    </g>
+  </g>
+
+  <!-- Central energy line -->
+  <g class="inner" stroke="white">
+    <path d="M256 95 V155 M256 315 V385"
+          stroke-width="1.5"/>
+    <path d="M246 385 L256 400 L266 385 L256 370Z"
+          fill="white"/>
+  </g>
+
+  <!-- Stars -->
+  <g class="spark" fill="white">
+    <path d="M256 145 L261 158 L274 163
+             L261 168 L256 181 L251 168
+             L238 163 L251 158Z"/>
+    <circle cx="155" cy="190" r="3"/>
+    <circle cx="357" cy="190" r="3"/>
+    <circle cx="190" cy="330" r="2"/>
+    <circle cx="322" cy="330" r="2"/>
+  </g>
+
+  <!-- NIMO typography -->
+  <g class="word" fill="white"
+     font-family="Arial, sans-serif"
+     text-anchor="middle">
+    <text x="256" y="470"
+          font-size="47"
+          font-weight="300"
+          letter-spacing="13">
+      NIMO
+    </text>
+  </g>
+
+</svg>

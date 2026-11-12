@@ -1,6 +1,7 @@
 <div align="center">
 
 # Nimo
+<img src="logo.svg" width="100" height="100" alt="Nimo Logo" />
 
 **A persistent, associative, governed memory engine for tool-using agents.**
 

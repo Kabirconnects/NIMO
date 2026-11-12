@@ -2,7 +2,7 @@ import axios from "axios";
 
 const DEFAULT_API_URL = import.meta.env.PROD
   ? "https://api.yourdomain.com"
-  : "http://localhost:5000";
+  : "/api";
 
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL || DEFAULT_API_URL,

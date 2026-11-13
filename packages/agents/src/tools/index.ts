@@ -12,6 +12,7 @@ import {
   runTestsTool, explainFileTool, refactorTool,
   runCommandTool, gitStatusTool, benchmarkTool,
   createToolTool, listWorkspaceToolsTool, callWorkspaceToolTool,
+  manageProcessTool,
 } from "./code/index.js";
 import { webFetchTool, extractDataTool, summarizeTool } from "./research/index.js";
 import { memoryTools } from "@workspace/memory";
@@ -32,6 +33,7 @@ export const tools: ToolSet = {
   explainFile: explainFileTool,
   refactor: refactorTool,
   runCommand: runCommandTool,
+  manageProcess: manageProcessTool,
   gitStatus: gitStatusTool,
   benchmark: benchmarkTool,
   createTool: createToolTool,

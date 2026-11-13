@@ -4,11 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { matchesGlob, isGlobPattern } from "./glob.js";
 
-// Portable default: ~/.nimo. AGENT_WORKSPACE wins, so server/CLI runs can point
-// the sandbox anywhere without editing code.
+// Portable default: ~/.nimo. AGENT_WORKSPACE (or NIMO_WORKSPACE, the name the
+// server .env uses) wins, so server/CLI runs can point the sandbox anywhere
+// without editing code.
 const DEFAULT_WORKSPACE = path.join(os.homedir(), ".nimo");
 
-const configuredRoot = path.resolve(process.env.AGENT_WORKSPACE ?? DEFAULT_WORKSPACE);
+const configuredRoot = path.resolve(
+  process.env.AGENT_WORKSPACE ?? process.env.NIMO_WORKSPACE ?? DEFAULT_WORKSPACE,
+);
 
 export const ROOT = fs.existsSync(configuredRoot)
   ? fs.realpathSync(configuredRoot)
@@ -34,6 +37,7 @@ export const SKIP_DIRS = new Set([
   ".mypy_cache",
   "target",
   "vendor",
+  ".nimo-procs",
 ]);
 
 /** Files that commonly contain credentials; never readable/writable by tools. */

@@ -1,22 +1,15 @@
-import useAgentChat, {
-  type ChatInput,
-} from "../hooks/useAgentChat";
+import useAgentChat from "../hooks/useAgentChat";
 
 function useChatHandler() {
   const chat = useAgentChat();
 
-  const chatHandler = (input: ChatInput) => {
-    chat.mutate(input);
-  };
-
   return {
-    chatHandler,
-    data: chat.data,
-    error: chat.error,
-    isPending: chat.isPending,
-    isError: chat.isError,
-    isSuccess: chat.isSuccess,
+    messages: chat.messages,
+    sendMessage: chat.send,
+    stop: chat.stop,
     reset: chat.reset,
+    isStreaming: chat.isStreaming,
+    error: chat.error,
   };
 }
 

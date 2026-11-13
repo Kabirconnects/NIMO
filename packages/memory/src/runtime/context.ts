@@ -65,8 +65,10 @@ export function permissionsFor(
   mode: AgentMode,
   destructiveConfirmed: boolean,
 ): MemoryPermissions {
-  const write = mode === "Auto";
-  return { write, delete: write && destructiveConfirmed };
+  // Learning is not a filesystem write: every mode may record memories so the
+  // brain keeps growing. Only deletion is gated by mode + explicit human
+  // confirmation, which is what makes forgetMemory Auto-only.
+  return { write: true, delete: mode === "Auto" && destructiveConfirmed };
 }
 
 const storage = new AsyncLocalStorage<MemoryRuntimeContext>();

@@ -1,6 +1,6 @@
 // tools/shared/process.ts
 // One hardened process runner shared by runCommand / runTests / gitStatus /
-// benchmark / tool-foundry.
+// benchmark / tool-foundry / manageProcess.
 //
 // Properties that matter for an agent harness:
 //   - allowlisted executables only (no arbitrary binaries);
@@ -9,10 +9,14 @@
 //     against shell metacharacters, so `&&`, `|`, `>` cannot be injected;
 //   - scrubbed environment (API keys never reach child processes);
 //   - hard timeout with process-tree kill;
-//   - bounded output that keeps the tail (where build/test errors live).
+//   - bounded output that keeps the tail (where build/test errors live);
+//   - long-running commands (dev servers, watchers, installs) can be detached
+//     after a short wait window and inspected/stopped later instead of hanging
+//     the agent until a timeout kills the thing it just started.
 
-import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import type { ChildProcess, StdioOptions } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { ROOT, safeEnv } from "./workspace.js";
@@ -27,6 +31,7 @@ const DEFAULT_ALLOWED = new Set([
   "yarn",
   "bun",
   "bunx",
+  "deno",
   "tsx",
   "tsc",
   "vitest",
@@ -44,16 +49,30 @@ const DEFAULT_ALLOWED = new Set([
   "pip",
   "pip3",
   "pytest",
+  "uv",
+  "poetry",
   "go",
   "cargo",
   "rustc",
   "make",
   "cmake",
+  "gcc",
+  "g++",
+  "cc",
+  "clang",
+  "clang++",
   "dotnet",
   "java",
   "javac",
   "mvn",
   "gradle",
+  "docker",
+  "docker-compose",
+  "sqlite3",
+  "curl",
+  "tar",
+  "zip",
+  "unzip",
 ]);
 
 /** Commands that are read-only shell basics; useful for quick inspection. */
@@ -235,10 +254,26 @@ export interface RunProcessOptions {
   stdin?: string;
   /** Extra non-secret environment variables (CI=1, NODE_ENV=test, ...). */
   env?: Record<string, string>;
+  /**
+   * Wait at most this long for the process to exit. If it is still running,
+   * return immediately with `running: true` and leave it running in the
+   * background (id/pid/logFile) instead of blocking or killing it.
+   * Omit for the classic "wait until exit or timeout" behaviour.
+   */
+  waitMs?: number;
 }
 
 export interface RunProcessResult {
   ok: boolean;
+  /** The command did not exit within waitMs and was left running. */
+  running?: boolean;
+  /** Background process id (present whenever the command outlived waitMs). */
+  id?: string;
+  pid?: number | null;
+  /** Absolute path to the captured stdout log (background mode). */
+  logFile?: string;
+  /** An identical command was already running and was reused. */
+  reused?: boolean;
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   stdout: string;
@@ -246,6 +281,249 @@ export interface RunProcessResult {
   durationMs: number;
   timedOut: boolean;
   truncated: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Background process registry
+// ---------------------------------------------------------------------------
+// Long-running dev servers must survive both the tool call and (ideally) a
+// restart of the API process, so metadata is mirrored to
+// `<workspace>/.nimo-procs/<id>.json` next to the stdout/stderr logs.
+
+export type ProcessStatus = "running" | "exited" | "failed" | "stopped";
+
+export interface BackgroundProcessInfo {
+  id: string;
+  command: string;
+  cwd: string;
+  relCwd: string;
+  pid: number | null;
+  status: ProcessStatus;
+  startedAt: string;
+  endedAt?: string;
+  exitCode?: number | null;
+  signal?: string | null;
+  logFile: string;
+  errLogFile: string;
+  relLogFile: string;
+  relErrLogFile: string;
+}
+
+interface LiveProcess extends BackgroundProcessInfo {
+  child?: ChildProcess;
+}
+
+const live = new Map<string, LiveProcess>();
+
+function procDir(): string {
+  const dir = path.join(ROOT, ".nimo-procs");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function metaFile(id: string): string {
+  return path.join(procDir(), `${id}.json`);
+}
+
+function relOrSelf(full: string): string {
+  const rel = path.relative(ROOT, full);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return full;
+  return rel.split(path.sep).join("/");
+}
+
+/** Metadata only — never the ChildProcess handle (not serialisable). */
+function toPlain(info: BackgroundProcessInfo): BackgroundProcessInfo {
+  return {
+    id: info.id,
+    command: info.command,
+    cwd: info.cwd,
+    relCwd: info.relCwd,
+    pid: info.pid,
+    status: info.status,
+    startedAt: info.startedAt,
+    endedAt: info.endedAt,
+    exitCode: info.exitCode,
+    signal: info.signal,
+    logFile: info.logFile,
+    errLogFile: info.errLogFile,
+    relLogFile: info.relLogFile,
+    relErrLogFile: info.relErrLogFile,
+  };
+}
+
+function persist(info: BackgroundProcessInfo): void {
+  try {
+    fs.writeFileSync(metaFile(info.id), JSON.stringify(toPlain(info), null, 2), "utf-8");
+  } catch {
+    /* the registry is best-effort; logs still exist */
+  }
+}
+
+function readMeta(id: string): BackgroundProcessInfo | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(metaFile(id), "utf-8")) as BackgroundProcessInfo;
+    if (!raw || typeof raw.id !== "string") return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function isPidAlive(pid: number | null | undefined): boolean {
+  if (pid === null || pid === undefined) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function readLogTail(file: string, maxBytes: number): { text: string; truncated: boolean } {
+  try {
+    const stat = fs.statSync(file);
+    if (stat.size === 0) return { text: "", truncated: false };
+    const start = Math.max(0, stat.size - maxBytes);
+    const length = stat.size - start;
+    const fd = fs.openSync(file, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, start);
+      return { text: buffer.toString("utf8"), truncated: start > 0 };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return { text: "", truncated: false };
+  }
+}
+
+function killPidTree(pid: number | null | undefined, wait: boolean): void {
+  if (pid === null || pid === undefined) return;
+  if (process.platform === "win32") {
+    const args = ["/pid", String(pid), "/t", "/f"];
+    if (wait) {
+      try {
+        spawnSync("taskkill", args, { stdio: "ignore", windowsHide: true });
+      } catch {
+        /* already gone */
+      }
+      return;
+    }
+    try {
+      spawn("taskkill", args, { stdio: "ignore", windowsHide: true }).unref();
+    } catch {
+      /* already gone */
+    }
+    return;
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    /* already gone */
+  }
+}
+
+/** All known processes, live ones first, newest first. */
+export function listBackgroundProcesses(): BackgroundProcessInfo[] {
+  const merged = new Map<string, BackgroundProcessInfo>();
+
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(procDir());
+  } catch {
+    files = [];
+  }
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    const info = readMeta(file.replace(/\.json$/, ""));
+    if (!info) continue;
+    if (info.status === "running" && !live.has(info.id) && !isPidAlive(info.pid)) {
+      // The API restarted (or the machine rebooted) and the pid is gone.
+      info.status = "exited";
+      info.endedAt = info.endedAt ?? new Date().toISOString();
+      persist(info);
+    }
+    merged.set(info.id, info);
+  }
+
+  for (const [id, info] of live) merged.set(id, toPlain(info));
+
+  return [...merged.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+export function getBackgroundProcess(id: string): BackgroundProcessInfo | null {
+  const info = live.get(id) ?? readMeta(id);
+  return info ? toPlain(info) : null;
+}
+
+export interface BackgroundLogResult {
+  id: string;
+  status: ProcessStatus;
+  command: string;
+  relCwd: string;
+  startedAt: string;
+  endedAt?: string;
+  exitCode?: number | null;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  logFile: string;
+  errLogFile: string;
+}
+
+export function readBackgroundLogs(id: string, maxBytes = 20_000): BackgroundLogResult {
+  const info = getBackgroundProcess(id);
+  if (!info) throw new Error(`No process with id '${id}'. Use action="list" to see ids.`);
+
+  const out = readLogTail(info.logFile, maxBytes);
+  const err = readLogTail(info.errLogFile, maxBytes);
+  return {
+    id: info.id,
+    status: info.status,
+    command: info.command,
+    relCwd: info.relCwd,
+    startedAt: info.startedAt,
+    endedAt: info.endedAt,
+    exitCode: info.exitCode ?? null,
+    stdout: out.text,
+    stderr: err.text,
+    truncated: out.truncated || err.truncated,
+    logFile: info.relLogFile,
+    errLogFile: info.relErrLogFile,
+  };
+}
+
+export function stopBackgroundProcess(id: string): BackgroundProcessInfo {
+  const info = live.get(id) ?? readMeta(id);
+  if (!info) throw new Error(`No process with id '${id}'. Use action="list" to see ids.`);
+
+  if (info.status !== "running") return toPlain(info);
+
+  killPidTree(info.pid, true);
+  info.status = "stopped";
+  info.endedAt = new Date().toISOString();
+  const current = live.get(id);
+  if (current) {
+    current.status = "stopped";
+    current.endedAt = info.endedAt;
+  }
+  persist(current ?? info);
+  return toPlain(current ?? info);
+}
+
+// ---------------------------------------------------------------------------
+// Spawning
+// ---------------------------------------------------------------------------
+
+interface LaunchSpec {
+  commandLine: string;
+  cwd: string;
+  args: string[];
+  launchBin: string;
+  useCmd: boolean;
+  env: NodeJS.ProcessEnv;
+  isWindows: boolean;
 }
 
 function runnableArgv(options: RunProcessOptions): string[] {
@@ -279,34 +557,11 @@ function childEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   return env;
 }
 
-function killTree(child: ChildProcess): void {
-  if (child.pid === undefined) return;
-  if (process.platform === "win32") {
-    try {
-      spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
-        stdio: "ignore",
-        windowsHide: true,
-      }).unref();
-      return;
-    } catch {
-      /* fall through */
-    }
-  }
-  try {
-    child.kill("SIGKILL");
-  } catch {
-    /* already gone */
-  }
-}
-
-export function runProcess(options: RunProcessOptions): Promise<RunProcessResult> {
+function prepareLaunch(options: RunProcessOptions): LaunchSpec {
   const argv = runnableArgv(options);
-  const cwd = options.cwd;
-  const timeoutMs = Math.min(Math.max(options.timeoutMs ?? 30_000, 1_000), 600_000);
-  const maxBytes = Math.min(Math.max(options.maxOutputBytes ?? 24_000, 1_000), 1_000_000);
-
   const [rawBin, ...args] = argv;
   const bin = rawBin!;
+  const cwd = options.cwd;
   const isWindows = process.platform === "win32";
 
   // Project binaries (tsc, eslint, vitest, ...) live in node_modules/.bin and
@@ -331,36 +586,157 @@ export function runProcess(options: RunProcessOptions): Promise<RunProcessResult
     useCmd = !/\.(exe|com)$/i.test(found);
   }
 
-  const child = useCmd
-    ? spawn(process.env.ComSpec ?? "cmd.exe", [
-        "/d",
-        "/s",
-        "/c",
-        // /s strips the first/last quote, so add an outer pair around the
-        // already-quoted command. This is the standard cmd /c quoting form.
-        `"${[launchBin, ...args].map(quoteForCmd).join(" ")}"`,
-      ], {
-        cwd,
-        env,
-        windowsHide: true,
-        // Node's default argument quoting uses backslash escapes that cmd.exe
-        // does not understand. Pass the already-quoted command verbatim.
-        windowsVerbatimArguments: true,
-      })
-    : spawn(launchBin, args, {
-        cwd,
-        env,
-        windowsHide: true,
-        shell: false,
-      });
+  return { commandLine: argv.join(" "), cwd, args, launchBin, useCmd, env, isWindows };
+}
+
+function spawnChild(
+  spec: LaunchSpec,
+  stdio: StdioOptions,
+  detached: boolean,
+): ChildProcess {
+  // cmd.exe /s /c strips the first and last quote, so wrap the already-quoted
+  // command in one outer pair. Every token was validated by quoteForCmd.
+  const cmdLine = `"${[spec.launchBin, ...spec.args].map(quoteForCmd).join(" ")}"`;
+
+  if (spec.useCmd) {
+    return spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", cmdLine], {
+      cwd: spec.cwd,
+      env: spec.env,
+      windowsHide: true,
+      detached,
+      // Node's default argument quoting uses backslash escapes that cmd.exe
+      // does not understand. Pass the already-quoted command verbatim.
+      windowsVerbatimArguments: true,
+      stdio,
+    });
+  }
+
+  return spawn(spec.launchBin, spec.args, {
+    cwd: spec.cwd,
+    env: spec.env,
+    windowsHide: true,
+    shell: false,
+    detached,
+    stdio,
+  });
+}
+
+interface DetachedStart {
+  info: LiveProcess;
+  child: ChildProcess;
+}
+
+function spawnDetached(spec: LaunchSpec, options: RunProcessOptions): DetachedStart {
+  const id = `p-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+  const dir = procDir();
+  const logFile = path.join(dir, `${id}.out.log`);
+  const errLogFile = path.join(dir, `${id}.err.log`);
+  fs.writeFileSync(logFile, "");
+  fs.writeFileSync(errLogFile, "");
+
+  const outFd = fs.openSync(logFile, "a");
+  const errFd = fs.openSync(errLogFile, "a");
+  let child: ChildProcess;
+  try {
+    child = spawnChild(spec, ["pipe", outFd, errFd], true);
+  } finally {
+    // The child holds its own duplicate of the descriptors.
+    fs.closeSync(outFd);
+    fs.closeSync(errFd);
+  }
+
+  // Never leave a background command waiting on stdin.
+  if (options.stdin !== undefined) child.stdin?.end(options.stdin);
+  else child.stdin?.end();
+
+  const startedAt = new Date().toISOString();
+  const info: LiveProcess = {
+    id,
+    command: spec.commandLine,
+    cwd: spec.cwd,
+    relCwd: relOrSelf(spec.cwd),
+    pid: child.pid ?? null,
+    status: "running",
+    startedAt,
+    logFile,
+    errLogFile,
+    relLogFile: relOrSelf(logFile),
+    relErrLogFile: relOrSelf(errLogFile),
+    child,
+  };
+
+  live.set(id, info);
+  persist(info);
+
+  const settle = (status: ProcessStatus, code: number | null, signal: NodeJS.Signals | null) => {
+    // A stop already marked it, do not resurrect it as "exited".
+    const current = live.get(id) ?? info;
+    if (current.status === "stopped") {
+      current.exitCode = code;
+      current.signal = signal ?? null;
+      persist(current);
+      return;
+    }
+    current.status = status;
+    current.exitCode = code;
+    current.signal = signal ?? null;
+    current.endedAt = new Date().toISOString();
+    persist(current);
+  };
+
+  child.once("exit", (code, signal) => {
+    settle(code === 0 ? "exited" : "failed", code, signal);
+  });
+  child.once("error", () => {
+    settle("failed", null, null);
+  });
+
+  return { info, child };
+}
+
+function findRunningByCommand(commandLine: string, cwd: string): LiveProcess | null {
+  for (const info of live.values()) {
+    if (info.status !== "running") continue;
+    if (info.command !== commandLine) continue;
+    if (path.resolve(info.cwd) !== path.resolve(cwd)) continue;
+    if (!isPidAlive(info.pid)) continue;
+    return info;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Public entry points
+// ---------------------------------------------------------------------------
+
+export function runProcess(options: RunProcessOptions): Promise<RunProcessResult> {
+  const spec = prepareLaunch(options);
+  const timeoutMs = Math.min(Math.max(options.timeoutMs ?? 30_000, 1_000), 600_000);
+  const maxBytes = Math.min(Math.max(options.maxOutputBytes ?? 24_000, 1_000), 1_000_000);
+
+  if (options.waitMs !== undefined) {
+    const waitMs = Math.min(Math.max(options.waitMs, 0), 600_000);
+    return runWithWaitWindow(spec, options, waitMs, maxBytes);
+  }
+  return runToCompletion(spec, options, timeoutMs, maxBytes);
+}
+
+/** Classic behaviour: wait for exit, kill the tree on timeout. */
+function runToCompletion(
+  spec: LaunchSpec,
+  options: RunProcessOptions,
+  timeoutMs: number,
+  maxBytes: number,
+): Promise<RunProcessResult> {
+  const child = spawnChild(spec, ["pipe", "pipe", "pipe"], false);
 
   const started = Date.now();
   let timedOut = false;
   let truncated = false;
-  let stdoutBuf: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-  let stderrBuf: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  let stdoutBuf: Buffer = Buffer.alloc(0);
+  let stderrBuf: Buffer = Buffer.alloc(0);
 
-  const append = (current: Buffer<ArrayBufferLike>, chunk: Buffer): Buffer<ArrayBufferLike> => {
+  const append = (current: Buffer, chunk: Buffer): Buffer => {
     const next = Buffer.concat([current, chunk]);
     if (next.length > maxBytes) {
       truncated = true;
@@ -376,15 +752,12 @@ export function runProcess(options: RunProcessOptions): Promise<RunProcessResult
     stderrBuf = append(stderrBuf, chunk);
   });
 
-  if (options.stdin !== undefined) {
-    child.stdin?.end(options.stdin);
-  } else {
-    child.stdin?.end();
-  }
+  if (options.stdin !== undefined) child.stdin?.end(options.stdin);
+  else child.stdin?.end();
 
   const timer = setTimeout(() => {
     timedOut = true;
-    killTree(child);
+    killPidTree(child.pid, false);
   }, timeoutMs);
 
   return new Promise<RunProcessResult>((resolve, reject) => {
@@ -396,6 +769,7 @@ export function runProcess(options: RunProcessOptions): Promise<RunProcessResult
       clearTimeout(timer);
       resolve({
         ok: code === 0 && !timedOut,
+        running: false,
         exitCode: code,
         signal: signal ?? null,
         stdout: stdoutBuf.toString("utf8"),
@@ -406,4 +780,100 @@ export function runProcess(options: RunProcessOptions): Promise<RunProcessResult
       });
     });
   });
+}
+
+/**
+ * Long-running behaviour: wait up to `waitMs`, then hand the process back to
+ * the caller with an id so it can be inspected (logs) and stopped later.
+ * An identical command already running is reused instead of duplicated.
+ */
+function runWithWaitWindow(
+  spec: LaunchSpec,
+  options: RunProcessOptions,
+  waitMs: number,
+  maxBytes: number,
+): Promise<RunProcessResult> {
+  const started = Date.now();
+
+  const existing = findRunningByCommand(spec.commandLine, spec.cwd);
+  if (existing) {
+    const out = readLogTail(existing.logFile, maxBytes);
+    const err = readLogTail(existing.errLogFile, maxBytes);
+    return Promise.resolve({
+      ok: true,
+      running: true,
+      reused: true,
+      id: existing.id,
+      pid: existing.pid,
+      logFile: existing.relLogFile,
+      exitCode: null,
+      signal: null,
+      stdout: out.text,
+      stderr: err.text,
+      durationMs: 0,
+      timedOut: false,
+      truncated: out.truncated || err.truncated,
+    });
+  }
+
+  let start: DetachedStart;
+  try {
+    start = spawnDetached(spec, options);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+
+  const { info, child } = start;
+
+  return new Promise<RunProcessResult>((resolve, reject) => {
+    let settled = false;
+
+    const finish = (running: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(waitTimer);
+
+      const out = readLogTail(info.logFile, maxBytes);
+      const err = readLogTail(info.errLogFile, maxBytes);
+      const current = live.get(info.id) ?? info;
+      const finishedOk = current.status === "exited" || current.exitCode === 0;
+
+      resolve({
+        ok: running ? true : finishedOk,
+        running,
+        id: current.id,
+        pid: current.pid,
+        logFile: current.relLogFile,
+        exitCode: running ? null : (current.exitCode ?? null),
+        signal: running ? null : ((current.signal as NodeJS.Signals | null) ?? null),
+        stdout: out.text,
+        stderr: err.text,
+        durationMs: Date.now() - started,
+        timedOut: false,
+        truncated: out.truncated || err.truncated,
+      });
+    };
+
+    // waitMs === 0 means "detach immediately, do not wait at all".
+    const waitTimer = setTimeout(() => finish(true), waitMs);
+
+    child.once("close", () => finish(false));
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(waitTimer);
+      reject(error);
+    });
+  });
+}
+
+/** Start a command fully detached and return at once (background: true). */
+export function startBackgroundProcess(options: RunProcessOptions): {
+  info: BackgroundProcessInfo;
+  reused: boolean;
+} {
+  const spec = prepareLaunch(options);
+  const existing = findRunningByCommand(spec.commandLine, spec.cwd);
+  if (existing) return { info: toPlain(existing), reused: true };
+  return { info: toPlain(spawnDetached(spec, options).info), reused: false };
 }

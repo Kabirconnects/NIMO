@@ -5,9 +5,10 @@
 // Security model:
 //   - the owner id comes from the request-scoped runtime context, NEVER from
 //     model-supplied input
-//   - write tools require `permissions.write` (Auto mode only)
+//   - write tools require `permissions.write` (available in every mode — the
+//     brain learns during chat/planning too)
 //   - delete tools require `permissions.delete` AND an explicit human
-//     confirmation for the turn
+//     confirmation for the turn (Auto mode only)
 //
 // `memoryTools` is the full registry (backwards compatible). Mode-aware
 // callers should compose `memoryReadTools` / `memoryWriteTools` /

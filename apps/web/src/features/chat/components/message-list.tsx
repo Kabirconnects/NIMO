@@ -1,10 +1,6 @@
 import { UserMessage } from "./user-message";
 import { AssistantMessage } from "./assistant-message";
-
-export type ChatMessage = {
-  role: "user" | "assistant";
-  text: string;
-};
+import type { ChatMessage } from "../types";
 
 export function MessageList({ messages }: { messages: ChatMessage[] }) {
   if (messages.length === 0) {
@@ -21,14 +17,14 @@ export function MessageList({ messages }: { messages: ChatMessage[] }) {
   }
 
   return (
-    <>
-      {messages.map((message, index) =>
+    <div className="flex flex-col gap-6">
+      {messages.map((message) =>
         message.role === "user" ? (
-          <UserMessage key={index} text={message.text} />
+          <UserMessage key={message.id} text={message.text} />
         ) : (
-          <AssistantMessage key={index} text={message.text} />
+          <AssistantMessage key={message.id} message={message} />
         ),
       )}
-    </>
+    </div>
   );
 }

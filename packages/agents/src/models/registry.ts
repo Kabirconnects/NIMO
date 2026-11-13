@@ -181,7 +181,8 @@ export function getProviderOptions(
           google: {
             thinkingConfig: {
               thinkingLevel: effort === "low" ? "low" : "high",
-              includeThoughts: false,
+              // Stream the model's reasoning so the chat can show its thoughts.
+              includeThoughts: true,
             },
           },
         };
@@ -190,7 +191,8 @@ export function getProviderOptions(
         google: {
           thinkingConfig: {
             thinkingBudget: GOOGLE_BUDGET[effort],
-            includeThoughts: false,
+            // Stream the model's reasoning so the chat can show its thoughts.
+            includeThoughts: true,
           },
         },
       };

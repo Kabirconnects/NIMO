@@ -315,9 +315,11 @@ Skills are stored in the same SQLite database and are owner-scoped. Policy gates
 
 **Mode permissions.** Tools enforce permissions at execution time, not only in the prompt:
 
-- `Chat` — memory read + research; memory writes are not exposed.
-- `Plan` — read-only orientation + memory read + research.
-- `Auto` — read/write + memory read/write/destructive + research.
+- `Chat` — memory read + memory write + research; no file writes or shell commands.
+- `Plan` — read-only orientation + memory read/write + research.
+- `Auto` — read/write + shell/background processes + memory read/write + research.
+
+Memory writes are available in every mode because learning is the point of the brain; only deletion is destructive and limited to `Auto` with host confirmation.
 
 Destructive memory operations additionally require `destructiveConfirmed=true` from the host. The model cannot set that flag.
 
@@ -499,7 +501,7 @@ These limitations are part of the result, not a footnote to hide.
 
 ## 7. The Agent Tool Layer (`packages/agents/src/tools`)
 
-The agent harness exposes **20 non-memory tools** plus **12 memory tools** (32 total in `Auto`). The tool layer was designed around a simple question: can an agent actually do software work — read a file, find a symbol, make a targeted edit, run the tests, inspect the diff, and recover from failure — without giving it an unrestricted shell?
+The agent harness exposes **21 non-memory tools** plus **12 memory tools** (33 total in `Auto`). The tool layer was designed around a simple question: can an agent actually do software work — read a file, find a symbol, make a targeted edit, run the tests, start a dev server, inspect the diff, and recover from failure — without giving it an unrestricted shell?
 
 ### 7.1 Design goals
 
@@ -524,19 +526,20 @@ The agent harness exposes **20 non-memory tools** plus **12 memory tools** (32 t
 | `mkdir` | Create a directory | Recursive, idempotent, write-permission checked |
 | `deleteDir` | Delete a directory recursively | Cannot delete the workspace root; `dryRun` lists entries first |
 
-### 7.3 Code tools (9)
+### 7.3 Code tools (10)
 
 | Tool | What it does | Notable behaviour |
 | --- | --- | --- |
-| `runCommand` | Run an allowlisted dev command | Argv or tokenised command, no shell, local `.bin` on PATH, scrubbed env, timeout + process-tree kill, capped tail output |
-| `runTests` | Run the project's tests or typecheck | `auto` detects the package manager and `package.json` test script (or tsconfig), extracts pass/fail counts and failure lines |
+| `runCommand` | Run an allowlisted dev command | Argv or tokenised command, no shell, local `.bin` on PATH, scrubbed env, capped tail output. Long-running commands return `{ running: true, id, pid, logFile }` instead of blocking or being killed |
+| `manageProcess` | Inspect and control background commands | `list`, `logs` (stdout/stderr tail), `stop`, `stopAll`; read-only actions work in every mode, stopping requires shell permission |
+| `runTests` | Run the project's tests or typecheck | `auto` detects the package manager, the `test`/`typecheck` script, tsconfig, or a Python/Go/Rust project, and fails with a clear message when nothing is configured |
 | `gitStatus` | Inspect git state | `status`, `diff`, `diff-stat`, `log`, `show`, `branch`; staged/ref filters; read-only |
 | `explainFile` | Outline a source file | Imports, exports, functions, classes, methods, interfaces, types, line ranges; TypeScript/JavaScript detail, Python, generic fallback |
 | `refactor` | Cross-file find-and-replace | Dry-run by default, glob include/exclude, per-file counts and previews, atomic writes, permission checked |
 | `benchmark` | Time a command repeatedly | Warmup runs, mean/median/min/max/p95/stddev, failure detection |
-| `createTool` | Create a workspace tool | Writes `tools/foundry/<name>.ts`, refuses overwrite, validates `tool({ execute })` shape, optional typecheck when a tsconfig exists |
-| `listWorkspaceTools` | Discover foundry tools | Name, path, description, size, mtime |
-| `callWorkspaceTool` | Execute a foundry tool | Dynamic `file://` import, JSON arguments, structured error reporting |
+| `createTool` | Create or fix a workspace tool | Writes a self-contained `tools/foundry/<name>.mjs`, `node --check` syntax gate before saving, `overwrite=true` to repair an existing tool, returns the existing source instead of duplicating |
+| `listWorkspaceTools` | Discover foundry tools | Name, path, description, params, format (`esm` vs legacy `ts`), size, mtime |
+| `callWorkspaceTool` | Execute a foundry tool | Cache-busted dynamic `file://` import, JSON arguments, a `ctx` helper API, structured error reporting |
 
 ### 7.4 Research tools (3)
 
@@ -557,32 +560,39 @@ The agent harness exposes **20 non-memory tools** plus **12 memory tools** (32 t
 
 | Mode | Tools | Composition |
 | --- | ---: | --- |
-| `Chat` | 8 | 5 memory read + 3 research |
-| `Plan` | 14 | 6 read (`listFiles`, `readFile`, `search`, `explainFile`, `listWorkspaceTools`, `callWorkspaceTool`) + 5 memory read + 3 research |
-| `Auto` | 32 | 6 read + 11 write/code + 12 memory + 3 research |
+| `Chat` | 14 | 5 memory read + 6 memory write + 3 research |
+| `Plan` | 21 | 7 read (`listFiles`, `readFile`, `search`, `explainFile`, `listWorkspaceTools`, `callWorkspaceTool`, `manageProcess`) + 5 memory read + 6 memory write + 3 research |
+| `Auto` | 33 | 7 read + 11 write/code + 12 memory + 3 research |
 
-The memory tool split is intentional. Chat and Plan can recall, but cannot call `remember`, `linkMemories`, `updateMemory`, `teach`, `teachSkill`, or `useSkill`; `forgetMemory` is destructive and additionally requires host confirmation.
+The memory split is about destruction, not learning. Every mode can read and write memory, because remembering is how the agent learns during conversation and planning as well as execution. Only `forgetMemory` is destructive: it requires `Auto` mode *and* an explicit host confirmation for the turn.
 
 ### 7.7 Workspace and file safety
 
-- Default workspace root: `~/.nimo` (`os.homedir()`), overridable with `AGENT_WORKSPACE`.
+- Default workspace root: `~/.nimo` (`os.homedir()`), overridable with `AGENT_WORKSPACE` (or `NIMO_WORKSPACE`, the name used by `apps/server/.env`).
 - Paths are resolved inside the root. Traversal (`../`), absolute paths outside the root, NUL bytes, and symlink escapes are rejected.
 - `.env*`, private keys, credentials, `.npmrc`, `.netrc`, service-account JSON, and similar files are blocked from read and write.
 - `.git`, the memory store, and the database files are protected from file-tool writes.
 - Binary files are detected by a NUL-byte sample and are not silently decoded.
-- The walker skips `node_modules`, `.git`, `dist`, `build`, `.next`, `.turbo`, coverage, virtual environments, and other generated trees.
+- The walker skips `node_modules`, `.git`, `dist`, `build`, `.next`, `.turbo`, `.nimo-procs`, coverage, virtual environments, and other generated trees.
 
 ### 7.8 Process safety
 
-`runCommand`, `runTests`, `gitStatus`, and `benchmark` share one hardened process runner:
+`runCommand`, `runTests`, `gitStatus`, `benchmark`, `createTool`, and `manageProcess` share one hardened process runner:
 
-- **Allowlisted executables** — git, node, npm, pnpm, yarn, bun, tsx, tsc, vitest, jest, eslint, prettier, next, vite, turbo, esbuild, webpack, rollup, Python, Go, Rust, Java, .NET, and a few read-only shell basics. Extend with `AGENT_SHELL_ALLOW`.
+- **Allowlisted executables** — git, node, npm, pnpm, yarn, bun, tsx, tsc, vitest, jest, eslint, prettier, next, vite, turbo, esbuild, webpack, rollup, Python, uv, poetry, Go, Rust, Java, .NET, docker, sqlite3, curl, tar/zip, and a few read-only shell basics. Extend with `AGENT_SHELL_ALLOW`.
 - **No shell interpolation** — commands are tokenised into an argv array. `&&`, `||`, `|`, `;`, `>`, `>>`, and `<` as standalone tokens are rejected. Use the dedicated search/read/write tools instead of pipelines.
 - **Windows `.cmd` shims** — the runner resolves the absolute executable path and passes it to `cmd.exe`, so npm/pnpm shims keep their `%~dp0` install directory. Environment-variable expansion (`%VAR%`), literal quotes, NUL, and line breaks are rejected.
 - **Scrubbed environment** — API keys and credentials never reach child processes. Only PATH, home directories, temp, locale, and similar non-secret variables are kept.
 - **Deterministic output** — `CI=1`, `NO_COLOR=1`, `FORCE_COLOR=0`, `GIT_PAGER=cat`, `PAGER=cat`.
-- **Timeout and process-tree kill** — a hard timeout kills the child and its descendants, so a hung build does not hang the agent.
 - **Bounded output** — per-stream byte caps keep the tail, preserving the part where errors usually appear.
+
+Long-running commands are handled explicitly, because a dev server never exits:
+
+- `runCommand` waits up to `waitMs` (default 15s). If the command is still running it returns `{ running: true, id, pid, logFile }` and **leaves it running** instead of blocking the agent or killing the server it just started.
+- `background: true` (or `waitMs: 0`) detaches immediately. `timeoutMs` still kills the process tree, but only applies when `waitMs` is omitted.
+- An identical command (same normalized argv + cwd) that is already running is reused, so the agent cannot spawn duplicate servers. The result carries `reused: true` and the same `id`.
+- `manageProcess` reads the captured output (`list`, `logs`), which is how the agent learns the port/URL or the crash reason without re-running anything, and stops the tree when done (`stop`, `stopAll`).
+- State is mirrored to `<workspace>/.nimo-procs/<id>.{json,out.log,err.log}`, so processes and their logs remain inspectable after an API restart. The directory is skipped by the file walker.
 
 ### 7.9 Permissions
 
@@ -598,9 +608,29 @@ The mode comes from the memory runtime context established by `runAgent()`. `AGE
 
 ### 7.10 Tool foundry and its trust boundary
 
-`createTool` writes an ordinary TypeScript file under `<workspace>/tools/foundry/`. `listWorkspaceTools` discovers it; `callWorkspaceTool` imports it through `pathToFileURL()` (required on Windows) and invokes its `execute` function.
+`createTool` writes a self-contained ES module under `<workspace>/tools/foundry/<name>.mjs`. `listWorkspaceTools` discovers it; `callWorkspaceTool` imports it through a cache-busted `pathToFileURL()` (required on Windows) and calls its default export.
 
-Important boundary: **foundry tools are trusted code with Node privileges.** They are not executed inside a separate VM or permission sandbox. `createTool` validates the expected shape and optionally typechecks when the workspace has a `tsconfig.json`, but a malicious tool can still do anything the agent process can do. Only create foundry tools from trusted prompts or review the generated file before calling it.
+The contract is deliberately small so the model can get it right in one shot:
+
+```js
+// description: what it does
+export default async function run(args = {}, ctx) {
+  // ctx.workspaceRoot   absolute workspace path
+  // ctx.resolve(rel)    async -> absolute path inside the workspace (throws on escape)
+  // ctx.exists(rel) / ctx.readText(rel) / ctx.readJson(rel)
+  // ctx.writeText(rel, content)          async, requires write permission
+  // ctx.run(argv, { cwd, timeoutMs, waitMs }) -> { ok, exitCode, stdout, stderr }
+  // ctx.log(message)    annotate the tool result
+  return { ok: true };
+}
+```
+
+- Plain JavaScript only — no type annotations, no JSX, no `import type`.
+- `node:` builtins are allowed; `child_process` and `process.exit`/`process.kill` are rejected (use `ctx.run`, which shares the allowlist and sandbox).
+- The generated file is syntax-checked with `node --check` **before** it is saved, so a broken tool never replaces a working one; the compiler output is returned so the model can fix and retry.
+- An existing name is never silently overwritten: `createTool` returns the existing source and a hint to pass `overwrite=true` with the complete corrected module. Legacy `.ts` files in the foundry directory are listed but reported as uncallable, with instructions to recreate them as `.mjs`.
+
+Important boundary: **foundry tools are trusted code with Node privileges.** They are not executed inside a separate VM or permission sandbox. `createTool` validates the module shape and syntax, but a malicious tool can still do anything the agent process can do. Only create foundry tools from trusted prompts or review the generated file before calling it.
 
 The foundry is a convenience for capturing repeated operations, not a security boundary.
 
@@ -709,7 +739,7 @@ HOST=127.0.0.1
 | `HOST` | No | `127.0.0.1` | Server host |
 | provider keys | If used | — | Only the provider you use |
 | `PAME_OWNER_ID` | No | `local` | Local-dev owner scope |
-| `AGENT_WORKSPACE` | No | `~/.nimo` | Workspace root; also used for the default DB root |
+| `AGENT_WORKSPACE` | No | `~/.nimo` | Workspace root; also used for the default DB root. `NIMO_WORKSPACE` is an accepted alias |
 | `PAME_DATA_DIR` | No | — | Fallback DB root |
 | `PAME_DB_PATH` | No | `<root>/pame.db` | Exact database file |
 | `PAME_MULTI_USER` | No | unset | Set `true` to require an authenticated owner |
@@ -802,7 +832,7 @@ The research lab lives in `packages/memory/nimo/`: `neurons/`, `synapses/`, `cor
 | Retrieval benchmark | **Implemented, limited** | 18 questions; synthetic, not blind |
 | Universal benchmark | **Implemented, limited** | 62 questions / 6 axes; 100%; synthetic, not blind |
 | Server | **Working entrypoint** | Express API, `POST /agent` |
-| Agent tool layer | **Upgraded** | 20 non-memory tools + 12 memory tools; sandboxed file/process execution |
+| Agent tool layer | **Upgraded** | 21 non-memory tools + 12 memory tools; sandboxed file/process execution, background processes with logs, self-checking tool foundry |
 | CLI | **Scaffold** | UI shell; send path not wired |
 | Web | **Scaffold** | Next.js shell; not wired |
 | Dense embeddings / reranker / graph DB | **Unsupported** | Deliberately out of scope |

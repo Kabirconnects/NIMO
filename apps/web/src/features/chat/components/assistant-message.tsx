@@ -104,7 +104,7 @@ function PayloadBlock({ label, value }: { label: string; value: unknown }) {
       <div className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
         {label}
       </div>
-      <pre className="max-h-64 overflow-auto rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/90">
+      <pre className="max-h-64 overflow-auto rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap wrap-break-word text-foreground/90">
         {formatPayload(value)}
       </pre>
     </div>
@@ -200,7 +200,7 @@ function ReasoningBlock({ text, live }: { text: string; live: boolean }) {
         />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1.5 ml-[7px] border-l border-border pl-3 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+        <div className="mt-1.5 ml-1.75 border-l border-border pl-3 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {text}
         </div>
       </CollapsibleContent>

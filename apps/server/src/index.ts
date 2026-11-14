@@ -1,8 +1,13 @@
 import { env } from "./lib/env.js";
 import { createApp } from "./app.js";
+import { connectDB } from "@workspace/db";
+
 
 export async function startServer() {
+
+  await connectDB();
   const app = createApp();
+
 
   const server = app.listen(env.PORT, env.HOST, () => {
     console.log(`Nimo API running at http://${env.HOST}:${env.PORT}`);

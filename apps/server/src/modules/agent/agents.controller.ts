@@ -8,9 +8,10 @@ import {
   type Effort,
 } from "@workspace/agents"
 import { MemoryAccessError } from "@workspace/memory"
-import { chatSchema } from "./agents.schema.js"
+import { chatSchema, AgentSettingsSchema } from "./agents.schema.js"
 import { resolveRequestIdentity, IdentityError } from "./identity.js"
 import { env } from "../../lib/env.js"
+// import AgentSettings from "@workspace/db"
 
 //{
 // "prompt": "who are you?",
@@ -149,6 +150,30 @@ export async function chatWithAgent(req: Request, res: Response) {
       return
     }
 
+    return res.status(500).json({
+      success: false,
+      error: "Agent execution failed",
+    })
+  }
+}
+
+export async function updateAgentSettings(req: Request, res: Response) {
+  try {
+    const result = AgentSettingsSchema.safeParse(req.body)
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid agent settings",
+        details: result.error.flatten(),
+      })
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Agent settings updated successfully",
+    })
+  } catch (error) {
     return res.status(500).json({
       success: false,
       error: "Agent execution failed",

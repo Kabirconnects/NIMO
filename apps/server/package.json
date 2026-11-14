@@ -17,6 +17,7 @@
     "@ai-sdk/google": "^4.0.109",
     "@workspace/agents": "workspace:*",
     "@workspace/memory": "workspace:*",
+    "@workspace/db": "workspace:*",
     "ai": "^7.0.162",
     "cors": "^2.8.6",
     "dotenv": "^18.0.9",

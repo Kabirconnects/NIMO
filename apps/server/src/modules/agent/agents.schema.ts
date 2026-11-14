@@ -13,3 +13,16 @@ export const chatSchema = z.object({
    */
   confirmDestructive: z.boolean().optional(),
 });
+
+
+export const AgentSettings = z.object({
+
+})
+
+export const AgentSettingsSchema = z.object({
+  modelId: z.string().min(1),
+  provider: z.string().min(1),
+  temperature: z.number().min(0).max(2).optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
+  systemPrompt: z.string().optional(),
+});

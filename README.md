@@ -9,6 +9,29 @@
 
 </div>
 
+> [!WARNING]
+> **Nimo is an experimental, work-in-progress research project — not a finished product.**
+>
+> The memory engine (PAME) and the server are implemented and pass their own test suites, but the CLI and
+> web UI are still scaffolds, public interfaces may change without notice, and the benchmarks are
+> self-authored regression evidence rather than independent validation. Nothing in this repository should be
+> read as a claim that the project is complete or production-ready.
+>
+> - Read the project note for scope, current status, and the roadmap: **[note.md](note.md)**
+> - Want to help? Start with **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+> - The current license is a provisional proprietary/evaluation license. **Once the project is finished,
+>   the license will be changed to MIT.** See [License](#12-contributing-security-and-license).
+
+## At a glance
+
+| | |
+| --- | --- |
+| **What this is** | An experimental memory engine for tool-using agents, plus an agent harness that exercises it. |
+| **Maturity** | Research preview. Core memory + server work; CLI and web are not wired to the agent yet. |
+| **Evidence** | 314/314 internal checks and 62/62 universal questions pass — but the corpora are synthetic and not blind. |
+| **Not claimed** | State-of-the-art retrieval, AGI, autonomous learning, production readiness, or security hardening against untrusted repositories. |
+| **License today → later** | Proprietary evaluation license now; **MIT after the project is completed**. |
+
 > **Nimo is not an AI agent. Nimo is a memory.**
 >
 > This repository contains both the memory engine and an agent harness that exercises it. The research claim is about the memory: an agent should not start every turn as a stranger, and it should not merely accumulate chat history. It should retain evidence, connect related knowledge, preserve contradictions, forget safely, and turn repeated procedures into reusable skills.
@@ -788,7 +811,7 @@ Errors return `{ "success": false, "error": "..." }` with `400` (invalid request
 ### 10.5 CLI and web
 
 - **CLI** (`apps/cli`) — OpenTUI terminal UI, run with `pnpm --filter @workspace/cli dev` (Bun). The UI shell renders, but the send path is not wired to `runAgent()` yet.
-- **Web** (`apps/web`) — Next.js starter shell. It is not yet wired to the agent API.
+- **Web** (`apps/web`) — Vite + React starter shell. It is not yet wired to the agent API.
 - **Server** is the complete, working entrypoint.
 
 ### 10.6 Monorepo structure
@@ -797,7 +820,7 @@ Errors return `{ "success": false, "error": "..." }` with `400` (invalid request
 apps/
   cli/       # OpenTUI terminal UI (@workspace/cli)
   server/    # Express API wrapping runAgent() (@workspace/server)
-  web/       # Next.js 16 app (web)
+  web/       # Vite + React app (web)
 packages/
   agents/    # runAgent() runtime, models, and the tool layer
   memory/    # PAME memory engine, storage, retrieval, governance, workers
@@ -834,7 +857,7 @@ The research lab lives in `packages/memory/nimo/`: `neurons/`, `synapses/`, `cor
 | Server | **Working entrypoint** | Express API, `POST /agent` |
 | Agent tool layer | **Upgraded** | 21 non-memory tools + 12 memory tools; sandboxed file/process execution, background processes with logs, self-checking tool foundry |
 | CLI | **Scaffold** | UI shell; send path not wired |
-| Web | **Scaffold** | Next.js shell; not wired |
+| Web | **Scaffold** | Vite + React shell; not wired |
 | Dense embeddings / reranker / graph DB | **Unsupported** | Deliberately out of scope |
 | Authentication | **Host responsibility** | PAME consumes host-provided identity |
 | Robotics embodiment | **Substrate only** | Typed nodes/edges; no simulator or controller |
@@ -843,8 +866,12 @@ The research lab lives in `packages/memory/nimo/`: `neurons/`, `synapses/`, `cor
 
 ## 12. Contributing, Security, and License
 
-**Contributing.** See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the pull-request process. The CLI actually lives in `apps/cli`; use `pnpm --filter @workspace/cli dev` (the contributor guide may mention an older path).
+**Project note.** See [note.md](note.md) for the project's purpose, what is and is not finished, the current development priorities, and the long-term direction. It is the short, honest companion to this document: Nimo is still an experimental, incomplete project.
+
+**Contributing.** See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the pull-request process. Because the project is experimental, expect breaking changes between commits and open an issue before starting anything substantial. The CLI actually lives in `apps/cli`; use `pnpm --filter @workspace/cli dev` (the contributor guide may mention an older path).
 
 **Security.** Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md). Do not run the agent against untrusted repositories: the tool sandbox prevents traversal and shell injection, but package scripts, foundry tools, and checked-out code are trusted code with process privileges.
 
 **License.** Proprietary — © 2026 Himanshu Arodia. All rights reserved. See [LICENSE](LICENSE). Evaluation / personal non-commercial use only. No commercial use, copying, distribution, or resale without a written license; payment does not grant resale rights.
+
+> **License roadmap:** the proprietary license is provisional while the project is experimental and incomplete. **When the project is finished, it will be relicensed under the MIT License.** Until that change is actually committed, the current [LICENSE](LICENSE) terms apply; this note is a stated intention, not a present grant.

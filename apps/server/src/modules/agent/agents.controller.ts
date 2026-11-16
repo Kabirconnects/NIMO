@@ -8,10 +8,14 @@ import {
   type Effort,
 } from "@workspace/agents"
 import { MemoryAccessError } from "@workspace/memory"
-import { chatSchema, AgentSettingsSchema } from "./agents.schema.js"
+import {
+  chatSchema,
+  AgentSettingsSchema,
+  type AgentSettingsInput,
+} from "./agents.schema.js"
 import { resolveRequestIdentity, IdentityError } from "./identity.js"
 import { env } from "../../lib/env.js"
-// import AgentSettings from "@workspace/db"
+import { AgentSettings } from "@workspace/db"
 
 //{
 // "prompt": "who are you?",
@@ -157,26 +161,45 @@ export async function chatWithAgent(req: Request, res: Response) {
   }
 }
 
-export async function updateAgentSettings(req: Request, res: Response) {
-  try {
-    const result = AgentSettingsSchema.safeParse(req.body)
 
-    if (!result.success) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid agent settings",
-        details: result.error.flatten(),
-      })
-    }
+// export async function updateAgentSettings(req: Request, res: Response) {
+//   try {
+//     const result = AgentSettingsSchema.safeParse(req.body);
 
-    return res.status(200).json({
-      success: true,
-      message: "Agent settings updated successfully",
-    })
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: "Agent execution failed",
-    })
-  }
-}
+//     if (!result.success) {
+//       return res.status(400).json({
+//         success: false,
+//         error: "Invalid agent settings",
+//         details: result.error.flatten(),
+//       });
+//     }
+
+//     const settings: AgentSettingsInput = result.data;
+
+//     const updatedSettings = await AgentSettings.findOneAndUpdate(
+//       {},
+//       { $set: settings },
+//       {
+//         new: true,
+//         upsert: true,
+//         runValidators: true,
+//         setDefaultsOnInsert: true,
+//       }
+//     ).select(
+//       "-ANTHROPIC_API_KEY -GOOGLE_GENERATIVE_AI_API_KEY -DEEPSEEK_API_KEY -GROQ_API_KEY -OPENROUTER_API_KEY"
+//     );
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Agent settings updated successfully",
+//       settings: updatedSettings,
+//     });
+//   } catch (error) {
+//     console.error("Failed to update agent settings:", error);
+
+//     return res.status(500).json({
+//       success: false,
+//       error: "Failed to update agent settings",
+//     });
+//   }
+// }

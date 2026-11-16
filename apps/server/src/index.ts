@@ -1,17 +1,14 @@
-import { env } from "./lib/env.js";
-import { createApp } from "./app.js";
-import { connectDB } from "@workspace/db";
-
+import { env } from "./lib/env.js"
+import { createApp } from "./app.js"
+import { connectDB } from "@workspace/db"
 
 export async function startServer() {
-
-  await connectDB();
-  const app = createApp();
-
+  await connectDB()
+  const app = createApp()
 
   const server = app.listen(env.PORT, env.HOST, () => {
-    console.log(`Nimo API running at http://${env.HOST}:${env.PORT}`);
-  });
+    console.log(`Nimo API running at http://${env.HOST}:${env.PORT}`)
+  })
 
   return {
     server,
@@ -19,15 +16,15 @@ export async function startServer() {
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => {
-          if (error) reject(error);
-          else resolve();
-        });
+          if (error) reject(error)
+          else resolve()
+        })
       }),
-  };
+  }
 }
 
 // Start application
 startServer().catch((error) => {
-  console.error("Failed to start Nimo API:", error);
-  process.exitCode = 1;
-});
+  console.error("Failed to start Nimo API:", error)
+  process.exitCode = 1
+})

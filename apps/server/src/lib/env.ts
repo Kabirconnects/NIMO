@@ -12,6 +12,8 @@ const envSchema = z.object({
 
   HOST: z.string().default("127.0.0.1"),
 
+  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
+
   AI_MODEL: z.string().min(1, "AI_MODEL is required"),
   ANTHROPIC_API_KEY: z.string().optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),

@@ -15,14 +15,22 @@ export const chatSchema = z.object({
 });
 
 
-export const AgentSettings = z.object({
-
-})
-
 export const AgentSettingsSchema = z.object({
-  modelId: z.string().min(1),
-  provider: z.string().min(1),
-  temperature: z.number().min(0).max(2).optional(),
-  maxOutputTokens: z.number().int().positive().optional(),
-  systemPrompt: z.string().optional(),
+  NIMO_WORKSPACE: z.string().trim().min(1),
+
+  ANTHROPIC_API_KEY: z.string().optional(),
+  GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
+  DEEPSEEK_API_KEY: z.string().optional(),
+  GROQ_API_KEY: z.string().optional(),
+  OPENROUTER_API_KEY: z.string().optional(),
+
+  AI_MODEL: z.string().trim().min(1).optional(),
+
+  AI_EFFORT: z.string().trim().min(1).optional(),
+
+  AI_CONFIRM_DESTRUCTIVE: z.boolean().optional(),
 });
+
+export type AgentSettingsInput = z.infer<
+  typeof AgentSettingsSchema
+>;

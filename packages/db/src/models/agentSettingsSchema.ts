@@ -1,45 +1,58 @@
+import mongoose, { Schema, type InferSchemaType } from "mongoose"
 
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+const agentSettingsSchema = new Schema(
+  {
+    NIMO_WORKSPACE: {
+      type: String,
+      required: true,
+      trim: true,
+    },
 
-const agentSettingsSchema = new Schema({
-  NIMO_WORKSPACE: {
-    type: String,
-    required: true,
-    trim: true,
-  },
-  ANTHROPIC_API_KEY: {
-    type: String,
-    trim: true,
-  },
-  GOOGLE_GENERATIVE_AI_API_KEY: {
-    type: String,
-    trim: true,
-  },
-  DEEPSEEK_API_KEY: {
-    type: String,
-    trim: true,
-  },
-  GROQ_API_KEY: {
-    type: String,
-    trim: true,
-  },
-  OPENROUTER_API_KEY: {
-    type: String,
-    trim: true,
-  },
-  AI_MODEL: {
-    type: String,
-    trim: true,
-  },
-});
+    ANTHROPIC_API_KEY: {
+      type: String,
+      trim: true,
+      select: false,
+    },
 
-export type AgentSettingsType = InferSchemaType<
-  typeof agentSettingsSchema
->;
+    GOOGLE_GENERATIVE_AI_API_KEY: {
+      type: String,
+      trim: true,
+      select: false,
+    },
 
-const AgentSettings = mongoose.model(
-  "AgentSettings",
-  agentSettingsSchema
+    DEEPSEEK_API_KEY: {
+      type: String,
+      trim: true,
+      select: false,
+    },
+
+    GROQ_API_KEY: {
+      type: String,
+      trim: true,
+      select: false,
+    },
+
+    OPENROUTER_API_KEY: {
+      type: String,
+      trim: true,
+      select: false,
+    },
+
+    AI_MODEL: String,
+    AI_EFFORT: String,
+
+    AI_CONFIRM_DESTRUCTIVE: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { timestamps: true }
 );
 
-export default AgentSettings;
+export type AgentSettingsType = InferSchemaType<typeof agentSettingsSchema>
+
+const AgentSettings =
+  mongoose.models.AgentSettings ||
+  mongoose.model("AgentSettings", agentSettingsSchema)
+
+export default AgentSettings

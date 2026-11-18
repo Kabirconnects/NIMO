@@ -9,6 +9,7 @@ import {
   logout,
   updateUser,
 } from "./users.controller.js"
+import { authMiddleware } from "../../middleware/auth.middleware.js"
 
 const router: Router = express.Router()
 
@@ -19,7 +20,7 @@ router.post("/login", login)
 router.post("/logout", logout)
 
 // "/me" must be registered before "/:id", otherwise "me" is read as an id.
-router.get("/me", getMe)
+router.get("/me", authMiddleware, getMe)
 
 router.get("/:id", getUserById)
 router.patch("/:id", updateUser)

@@ -255,8 +255,9 @@ function renderPart(part: AssistantPart, live: boolean) {
 }
 
 function formatModel(modelId: string): string {
-  const [, name] = modelId.split("/");
-  return (name ?? modelId).replace(/[-_]/g, " ");
+  // Ids can be nested (`groq/openai/gpt-oss-120b`), so keep the last segment.
+  const name = modelId.split("/").pop() ?? modelId;
+  return name.replace(/[-_]/g, " ");
 }
 
 function formatTokens(tokens: number): string {

@@ -8,6 +8,41 @@ export interface ChatInput {
   confirmDestructive?: boolean;
 }
 
+export type ModelTier = "flagship" | "balanced" | "fast";
+
+/** Mirror of the server's serializable `ModelOption`. */
+export interface ModelOption {
+  id: string;
+  name: string;
+  provider: string;
+  providerLabel: string;
+  description: string;
+  capabilities: string[];
+  tier: ModelTier;
+  recommended: boolean;
+  free: boolean;
+  local: boolean;
+  supportsTools: boolean;
+  supportsReasoning: boolean;
+  /** False when the server is missing this provider's API key. */
+  configured: boolean;
+}
+
+export interface ModelGroup {
+  provider: string;
+  label: string;
+  configured: boolean;
+  models: ModelOption[];
+}
+
+/** Response of `GET /agent/models`. */
+export interface ModelsResponse {
+  success: boolean;
+  defaultModelId: string;
+  groups: ModelGroup[];
+  effortLevels: Effort[];
+}
+
 export interface AgentUsage {
   inputTokens?: number;
   outputTokens?: number;

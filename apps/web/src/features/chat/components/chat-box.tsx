@@ -21,9 +21,10 @@ import {
 } from "@workspace/ui/components/ui/select";
 import { cn } from "@workspace/ui/lib/utils";
 
+import { useModels } from "../hooks/use-models";
+
 type Effort = "none" | "low" | "medium" | "high";
 type EffortOption = "low" | "medium" | "high";
-type Model = { id: string; name: string };
 
 export type ChatSubmit = {
   prompt: string;
@@ -32,45 +33,8 @@ export type ChatSubmit = {
   files: File[];
 };
 
-const MODEL_GROUPS: { label: string; models: Model[] }[] = [
-  {
-    label: "Anthropic",
-    models: [{ id: "anthropic/claude-sonnet-4-5", name: "Claude Sonnet" }],
-  },
-  {
-    label: "Google",
-    models: [
-      { id: "google/gemini-2.5-flash", name: "Gemini Flash" },
-      { id: "google/gemini-3.1-flash-lite", name: "Gemini 3.1 Flash-Lite" },
-      { id: "google/gemma-4-26b", name: "Gemma 4 26B" },
-    ],
-  },
-  {
-    label: "OpenAI",
-    models: [{ id: "openai/gpt-4.1", name: "GPT-4.1" }],
-  },
-  {
-    label: "DeepSeek",
-    models: [{ id: "deepseek/deepseek-chat", name: "DeepSeek Chat" }],
-  },
-  {
-    label: "Groq",
-    models: [{ id: "groq/llama-3.3-70b-versatile", name: "Llama 3.3 70B" }],
-  },
-  {
-    label: "OpenRouter",
-    models: [
-      { id: "openrouter/auto", name: "OpenRouter Auto" },
-      { id: "openrouter/free", name: "OpenRouter Free" },
-      { id: "openrouter/qwen3-coder-free", name: "Qwen3 Coder (free)" },
-      { id: "openrouter/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-    ],
-  },
-  {
-    label: "Local",
-    models: [{ id: "ollama/gemma4:e4b", name: "Gemma 4 E4B" }],
-  },
-];
+/** Used only until the catalog finishes loading. */
+const FALLBACK_MODEL_ID = "anthropic/claude-sonnet-4-5";
 
 const EFFORTS: { value: EffortOption; label: string; icon: typeof Zap }[] = [
   { value: "low", label: "Fast", icon: Zap },
@@ -90,10 +54,22 @@ export function ChatBox({
   onStop?: () => void;
 }) {
   const [prompt, setPrompt] = useState("");
-  const [modelId, setModelId] = useState(MODEL_GROUPS[0].models[0].id);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [effort, setEffort] = useState<Effort>("medium");
   const [files, setFiles] = useState<File[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const { data: catalog } = useModels();
+  const groups = catalog?.groups ?? [];
+  // `selectedModelId` wins, but stays null until the user picks something so
+  // the server's configured default is used as soon as the catalog arrives.
+  const modelId =
+    selectedModelId ?? catalog?.defaultModelId ?? FALLBACK_MODEL_ID;
+  const modelNames = new Map(
+    groups.flatMap((group) =>
+      group.models.map((model) => [model.id, model.name] as const),
+    ),
+  );
 
   const canSend = prompt.trim().length > 0 && !streaming;
 
@@ -177,19 +153,36 @@ export function ChatBox({
             <Paperclip />
           </Button>
 
-          <Select value={modelId} onValueChange={(value) => value && setModelId(value)}>
+          <Select
+            value={groups.length > 0 ? modelId : null}
+            onValueChange={(value) => value && setSelectedModelId(value)}
+            itemToStringLabel={(id) => modelNames.get(id) ?? id}
+          >
             <SelectTrigger
               size="sm"
               className="max-w-44 border-0 bg-transparent shadow-none hover:bg-muted dark:bg-transparent"
             >
-              <SelectValue />
+              <SelectValue placeholder="Model" />
             </SelectTrigger>
             <SelectContent align="start" className="max-h-72">
-              {MODEL_GROUPS.map((group) => (
-                <SelectGroup key={group.label}>
+              {groups.map((group) => (
+                <SelectGroup key={group.provider}>
                   <SelectLabel>{group.label}</SelectLabel>
                   {group.models.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
+                    <SelectItem
+                      key={model.id}
+                      value={model.id}
+                      disabled={!model.configured}
+                      title={
+                        model.configured
+                          ? model.description
+                          : `${model.description} (add ${
+                              model.provider === "ollama"
+                                ? "a local model"
+                                : "the provider API key"
+                            } to use)`
+                      }
+                    >
                       {model.name}
                     </SelectItem>
                   ))}

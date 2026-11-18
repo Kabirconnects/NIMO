@@ -3,6 +3,10 @@ import { APICallError, RetryError } from "ai"
 import {
   runAgentStream,
   isModelConfigured,
+  getDefaultModelId,
+  getModelGroups,
+  resolveModelId,
+  EFFORT_LEVELS,
   type AgentStreamEvent,
   type ModelId,
   type Effort,
@@ -31,6 +35,21 @@ function sseFrame(event: AgentStreamEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`
 }
 
+/**
+ * Serializable model catalog for the web picker.
+ *
+ * `configured` comes from the current process env, so a model becomes
+ * selectable as soon as its provider key is present — no redeploy needed.
+ */
+export function listModels(_req: Request, res: Response) {
+  return res.status(200).json({
+    success: true,
+    defaultModelId: getDefaultModelId(),
+    groups: getModelGroups(),
+    effortLevels: EFFORT_LEVELS,
+  })
+}
+
 export async function chatWithAgent(req: Request, res: Response) {
   try {
     const parsed = chatSchema.safeParse(req.body)
@@ -57,7 +76,8 @@ export async function chatWithAgent(req: Request, res: Response) {
       throw error
     }
 
-    const modelId: ModelId = parsed.data.modelId ?? env.AI_MODEL
+    const modelId: ModelId =
+      parsed.data.modelId ?? resolveModelId(env.AI_MODEL)
     const mode = parsed.data.mode ?? "Auto"
     // const mode = parsed.data.mode ?? "Chat";
     const effort: Effort = parsed.data.effort ?? "medium" // "none" | "low" | "medium" | "high"

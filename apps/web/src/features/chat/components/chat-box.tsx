@@ -160,11 +160,14 @@ export function ChatBox({
           >
             <SelectTrigger
               size="sm"
-              className="max-w-44 border-0 bg-transparent shadow-none hover:bg-muted dark:bg-transparent"
+              className="max-w-[16rem] min-w-0 border-0 bg-transparent shadow-none hover:bg-muted max-sm:max-w-[55vw] dark:bg-transparent"
             >
               <SelectValue placeholder="Model" />
             </SelectTrigger>
-            <SelectContent align="start" className="max-h-72">
+            <SelectContent
+              align="start"
+              className="max-h-72 w-auto max-w-[85vw] min-w-(--anchor-width) sm:max-w-md"
+            >
               {groups.map((group) => (
                 <SelectGroup key={group.provider}>
                   <SelectLabel>{group.label}</SelectLabel>

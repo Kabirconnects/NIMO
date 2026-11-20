@@ -4,6 +4,7 @@ import { useKeyboard, useRenderer } from "@opentui/react";
 import { ChatPage } from "../features/chat";
 import { AuthPage, refreshSession } from "../features/auth";
 import { ProfilePage } from "../features/users";
+import { stopAll } from "../features/launcher";
 import { COLORS } from "../theme";
 
 type Screen = "chat" | "login" | "register" | "profile";
@@ -27,16 +28,22 @@ export function App() {
 
     // The renderer asks callers to wait for `closed` so the terminal is
     // restored, but never leave the user stuck if that promise stalls.
-    const fallback = setTimeout(() => process.exit(0), 1500);
+    const fallback = setTimeout(() => process.exit(0), 3000);
 
-    void renderer.closed
-      .then(() => {
-        clearTimeout(fallback);
-        process.exit(0);
-      })
-      .catch(() => {
-        clearTimeout(fallback);
-        process.exit(0);
+    // Services started by `nimo cli` (or by /dashboard) belong to this
+    // session; stop them before the process goes away.
+    void stopAll()
+      .catch(() => {})
+      .finally(() => {
+        void renderer.closed
+          .then(() => {
+            clearTimeout(fallback);
+            process.exit(0);
+          })
+          .catch(() => {
+            clearTimeout(fallback);
+            process.exit(0);
+          });
       });
   }, [renderer]);
 

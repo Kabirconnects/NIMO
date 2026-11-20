@@ -17,6 +17,10 @@ export type CommandContext = {
   showHelp: () => void;
   /** Show token usage for the current conversation. */
   showUsage: () => void;
+  /** Start the Nimo API if it is not already running. */
+  startBackend: () => void | Promise<void>;
+  /** Start the API and the web dashboard, then open it. */
+  startDashboard: () => void | Promise<void>;
   stop: () => void;
   notify: (message: string) => void;
 };

@@ -35,6 +35,22 @@ export const COMMANDS: Command[] = [
     },
   },
   {
+    name: "dashboard",
+    description: "Start the API and open the web dashboard",
+    value: "/dashboard",
+    action: (ctx) => {
+      void ctx.startDashboard();
+    },
+  },
+  {
+    name: "backend",
+    description: "Start the Nimo API in the background",
+    value: "/backend",
+    action: (ctx) => {
+      void ctx.startBackend();
+    },
+  },
+  {
     name: "stop",
     description: "Stop the response being generated",
     value: "/stop",

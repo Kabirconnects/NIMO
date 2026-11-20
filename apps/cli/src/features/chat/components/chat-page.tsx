@@ -7,6 +7,7 @@ import { MenuOverlay, type MenuRow } from "../../../components/menu-overlay";
 import type { CommandContext } from "../../../components/commandMenu/types";
 import { COLORS } from "../../../theme";
 import { getApiUrl, getConfig, updateConfig } from "../../../lib/config";
+import { useLauncher } from "../../launcher";
 import { useLogout, useSession } from "../../auth";
 import useChatHandler from "../handlers/chatHandler";
 import { useModels } from "../hooks/use-models";
@@ -118,6 +119,8 @@ export function ChatPage({ onNavigate, onExit }: ChatPageProps) {
     setNotice(message);
   }, []);
 
+  const launcher = useLauncher(notify);
+
   // Notices are transient; the chat keeps the screen otherwise.
   useEffect(() => {
     if (!notice) return;
@@ -193,6 +196,8 @@ export function ChatPage({ onNavigate, onExit }: ChatPageProps) {
     openEffort,
     showHelp: () => setOverlay("help"),
     showUsage: () => setOverlay("usage"),
+    startBackend: launcher.startBackend,
+    startDashboard: launcher.startDashboard,
     stop: chat.stop,
     notify,
   };

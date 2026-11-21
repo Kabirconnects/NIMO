@@ -91,8 +91,9 @@ export function resolveInvocation(args: string[]): Invocation {
     };
   }
 
-  // No words at all: keep the historical behaviour — open the terminal chat
-  // and let the API probe in the client decide whether the server is reachable.
+  // No words at all: start the API (reusing one that is already running) and
+  // open the terminal chat. This mirrors `nimo cli`, so `nimo` works out of the
+  // box instead of opening a chat whose backend was never started.
   if (!word) {
     if (noBrowser) {
       return {
@@ -100,7 +101,7 @@ export function resolveInvocation(args: string[]): Invocation {
         message: "“--no-browser” only applies to the dashboard",
       };
     }
-    return { kind: "launch", plan: tuiPlan([]) };
+    return { kind: "launch", plan: tuiPlan(["api"]) };
   }
 
   if (TUI_TARGETS.has(word)) {

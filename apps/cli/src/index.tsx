@@ -33,7 +33,7 @@ if (invocation.plan.kind === "headless") {
   process.exit(await runHeadless(invocation.plan));
 }
 
-// `nimo cli` starts the API first; plain `nimo` opens the chat as before.
+// Both `nimo` and `nimo cli` start the API first, so the chat is usable.
 if (!(await prepareTui(invocation.plan))) {
   process.exit(1);
 }

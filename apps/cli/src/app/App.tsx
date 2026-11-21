@@ -30,8 +30,8 @@ export function App() {
     // restored, but never leave the user stuck if that promise stalls.
     const fallback = setTimeout(() => process.exit(0), 3000);
 
-    // Services started by `nimo cli` (or by /dashboard) belong to this
-    // session; stop them before the process goes away.
+    // Services started by `nimo` (or by /dashboard) belong to this session;
+    // stop them before the process goes away.
     void stopAll()
       .catch(() => {})
       .finally(() => {

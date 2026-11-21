@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import {
@@ -6,6 +6,7 @@ import {
   getConfig,
   getApiUrl,
 } from "../../lib/config";
+import { readEnvFile, readServerEnv } from "../../lib/server-env";
 import type { Invocation, LaunchPlan, ServiceId } from "./types";
 
 export const SERVICE_LABELS: Record<ServiceId, string> = {
@@ -32,6 +33,8 @@ const DASHBOARD_TARGETS = new Set([
 ]);
 const API_TARGETS = new Set(["api", "backend", "server"]);
 const ALL_TARGETS = new Set(["dev", "start", "all", "run"]);
+const SETUP_TARGETS = new Set(["setup", "init"]);
+const DOCTOR_TARGETS = new Set(["doctor", "check"]);
 const HELP_TARGETS = new Set(["help"]);
 const VERSION_TARGETS = new Set(["version"]);
 
@@ -75,13 +78,6 @@ export function resolveInvocation(args: string[]): Invocation {
   }
 
   const knownFlags = new Set(["--no-browser", "--no-open"]);
-  const unknownFlag = flags.find((flag) => !knownFlags.has(flag));
-
-  if (unknownFlag) {
-    return { kind: "error", message: `unknown option “${unknownFlag}”` };
-  }
-
-  const noBrowser = flags.some((flag) => knownFlags.has(flag));
   const [word, ...rest] = words;
 
   if (rest.length > 0) {
@@ -90,6 +86,40 @@ export function resolveInvocation(args: string[]): Invocation {
       message: `unexpected argument “${rest[0]}”`,
     };
   }
+
+  if (word && SETUP_TARGETS.has(word)) {
+    const allowed = new Set(["--check", "--force", "--yes", "-y"]);
+    const unknown = flags.find((flag) => !allowed.has(flag));
+
+    if (unknown) {
+      return { kind: "error", message: `unknown option “${unknown}”` };
+    }
+
+    return {
+      kind: "setup",
+      check: flags.includes("--check"),
+      force: flags.includes("--force"),
+      yes: flags.includes("--yes") || flags.includes("-y"),
+    };
+  }
+
+  if (word && DOCTOR_TARGETS.has(word)) {
+    const unknown = flags[0];
+
+    if (unknown) {
+      return { kind: "error", message: `unknown option “${unknown}”` };
+    }
+
+    return { kind: "doctor" };
+  }
+
+  const unknownFlag = flags.find((flag) => !knownFlags.has(flag));
+
+  if (unknownFlag) {
+    return { kind: "error", message: `unknown option “${unknownFlag}”` };
+  }
+
+  const noBrowser = flags.some((flag) => knownFlags.has(flag));
 
   // No words at all: start the API (reusing one that is already running) and
   // open the terminal chat. This mirrors `nimo cli`, so `nimo` works out of the
@@ -142,6 +172,8 @@ const KNOWN_TARGETS = [
   ...DASHBOARD_TARGETS,
   ...API_TARGETS,
   ...ALL_TARGETS,
+  ...SETUP_TARGETS,
+  ...DOCTOR_TARGETS,
   "help",
   "version",
 ];
@@ -232,18 +264,20 @@ function isWorkspaceRoot(dir: string): boolean {
   );
 }
 
-/** Read only the port from `apps/server/.env`; never logs other values. */
+/** Read only the port from the personal config, then `apps/server/.env`. */
 export function readApiPort(root: string): number | null {
-  try {
-    const raw = readFileSync(join(root, SERVICE_DIRS.api, ".env"), "utf8");
-    const match = raw.match(/^\s*PORT\s*=\s*["']?(\d+)["']?\s*$/m);
-    if (!match) return null;
+  const personal = parsePort(readServerEnv().PORT);
+  if (personal) return personal;
 
-    const port = Number(match[1]);
-    return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
-  } catch {
-    return null;
-  }
+  const repository = readEnvFile(join(root, SERVICE_DIRS.api, ".env"));
+  return parsePort(repository.PORT);
+}
+
+function parsePort(value: string | undefined): number | null {
+  if (!value) return null;
+
+  const port = Number(value.trim());
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
 }
 
 /**

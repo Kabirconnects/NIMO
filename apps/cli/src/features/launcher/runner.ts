@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { updateConfig } from "../../lib/config";
 import {
   apiCandidateUrls,
+  findWorkspaceRoot,
   SERVICE_DIRS,
   SERVICE_LABELS,
   webCandidateUrls,
@@ -277,6 +278,14 @@ async function findApi(root: string): Promise<string | null> {
   }
 
   return null;
+}
+
+/**
+ * Find an API that is already answering, without needing a checkout.
+ * Used when the CLI is installed globally and cannot spawn the server itself.
+ */
+export async function findRunningApi(): Promise<string | null> {
+  return findApi(findWorkspaceRoot() ?? process.cwd());
 }
 
 async function probeApi(base: string): Promise<boolean> {

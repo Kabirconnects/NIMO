@@ -2,8 +2,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { openUrl } from "../../lib/open-url";
-import { ensureServices, describeFailure, getLogDir, stopAll } from "./runner";
-import { findWorkspaceRoot, SERVICE_LABELS } from "./targets";
+import { readEnvFile, readServerEnv } from "../../lib/server-env";
+import {
+  ensureServices,
+  describeFailure,
+  findRunningApi,
+  getLogDir,
+  stopAll,
+} from "./runner";
+import { findWorkspaceRoot, SERVICE_DIRS, SERVICE_LABELS } from "./targets";
 import type {
   LaunchPlan,
   ServiceId,
@@ -63,19 +70,26 @@ export function printHelp(): void {
     "  nimo backend|server  Aliases for api",
     "  nimo dev | start | all",
     "                       Start the API and dashboard together",
+    "  nimo setup           Configure the API (keys, database, secret)",
+    "  nimo doctor          Check the install and configuration",
     "  nimo help            Show this help",
     "  nimo version         Print the version",
     "",
     paint(ANSI.bold, "OPTIONS"),
     "  --no-browser         Do not open a browser (dashboard / dev / all)",
+    "  --check              (setup) Report whether configuration is complete",
+    "  --yes                (setup) Never prompt; read values from the environment",
+    "  --force              (setup) Regenerate JWT_SECRET",
     "",
     paint(ANSI.bold, "ENVIRONMENT"),
     "  NIMO_API_URL         Point the CLI at a running API",
+    "  NIMO_SERVER_ENV      API config file (default: ~/.nimo/server.env)",
     "  NIMO_WORKSPACE_ROOT  Repository root when run from outside it",
     "  NIMO_NO_BROWSER=1    Never open a browser",
     "  NIMO_LOG_DIR         Where service logs are written",
     "",
     paint(ANSI.bold, "EXAMPLES"),
+    "  nimo setup           Configure API keys, database, and secret",
     "  nimo dashboard       API + web dashboard, ready to use",
     "  nimo                 API + terminal chat",
     "  nimo api             Just the backend",
@@ -99,11 +113,25 @@ export async function prepareTui(plan: LaunchPlan): Promise<boolean> {
 
   const root = findWorkspaceRoot();
   if (!root) {
+    const running = await findRunningApi();
+
+    if (running) {
+      console.log(
+        paint(ANSI.dim, `  Using the API already running at ${running}.`),
+      );
+      return true;
+    }
+
     console.error(
-      "✖ Cannot find the Nimo workspace. Run this from the repository, or set NIMO_WORKSPACE_ROOT.",
+      "✖ Cannot start the Nimo API: no workspace checkout was found.",
+    );
+    console.error(
+      "  Run this from the repository, set NIMO_WORKSPACE_ROOT, or point NIMO_API_URL at a running API.",
     );
     return false;
   }
+
+  if (plan.services.includes("api")) warnIfUnconfigured(root);
 
   const states = await ensureServices(plan.services, {
     root,
@@ -153,6 +181,8 @@ export async function runHeadless(plan: LaunchPlan): Promise<number> {
     );
     return 1;
   }
+
+  if (plan.services.includes("api")) warnIfUnconfigured(root);
 
   const targets = plan.services
     .map((id) => SERVICE_LABELS[id])
@@ -286,4 +316,22 @@ function printTransition(
     default:
       break;
   }
+}
+
+/**
+ * Point first-time users at `nimo setup` when neither the personal config nor
+ * the checkout's `.env` can boot the API. This is a hint, never a blocker.
+ */
+function warnIfUnconfigured(root: string): void {
+  if (Object.keys(readServerEnv()).length > 0) return;
+
+  const repository = readEnvFile(join(root, SERVICE_DIRS.api, ".env"));
+  if (repository.MONGODB_URI && repository.JWT_SECRET) return;
+
+  console.log(
+    paint(
+      ANSI.yellow,
+      "  ! API configuration not found — run `nimo setup` (database, keys, secret).",
+    ),
+  );
 }

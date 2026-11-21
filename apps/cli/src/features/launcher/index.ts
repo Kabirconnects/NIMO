@@ -9,6 +9,7 @@ export {
   describeFailure,
   ensureService,
   ensureServices,
+  findRunningApi,
   getLogDir,
   getServiceState,
   stopAll,

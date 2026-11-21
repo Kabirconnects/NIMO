@@ -814,6 +814,21 @@ Errors return `{ "success": false, "error": "..." }` with `400` (invalid request
 - **Web** (`apps/web`) — Vite + React starter shell. It is not yet wired to the agent API.
 - **Server** is the complete, working entrypoint.
 
+The launcher configures and runs the stack:
+
+```bash
+nimo setup      # write ~/.nimo/server.env (JWT_SECRET, MONGODB_URI, provider keys)
+nimo doctor     # check runtime, configuration, and API health
+nimo            # start the API if needed, then open the chat
+nimo api        # only the API
+nimo dashboard  # API + web dashboard
+```
+
+`nimo setup` is safe to re-run: `--check` reports missing values without writing,
+`--yes` reads values from the environment instead of prompting, and `--force`
+rotates `JWT_SECRET`. Configuration lives in `~/.nimo/server.env` (mode `0600`,
+override with `NIMO_SERVER_ENV`) so it survives updates to an installed CLI.
+
 ### 10.6 Monorepo structure
 
 ```text

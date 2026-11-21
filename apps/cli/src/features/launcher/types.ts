@@ -20,6 +20,8 @@ export type LaunchPlan = {
 /** Result of reading the words typed after `nimo`. */
 export type Invocation =
   | { kind: "launch"; plan: LaunchPlan }
+  | { kind: "setup"; check: boolean; force: boolean; yes: boolean }
+  | { kind: "doctor" }
   | { kind: "help" }
   | { kind: "version" }
   | { kind: "error"; message: string };

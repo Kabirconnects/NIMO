@@ -10,6 +10,11 @@ import {
   resolveInvocation,
   runHeadless,
 } from "./features/launcher";
+import { runDoctor, runSetup } from "./features/setup";
+import { loadServerEnv } from "./lib/server-env";
+
+// `~/.nimo/server.env` feeds the API and the probes; real env vars still win.
+loadServerEnv();
 
 const invocation = resolveInvocation(process.argv.slice(2));
 
@@ -27,6 +32,14 @@ if (invocation.kind === "error") {
   console.error(`nimo: ${invocation.message}\n`);
   printHelp();
   process.exit(1);
+}
+
+if (invocation.kind === "setup") {
+  process.exit(await runSetup(invocation));
+}
+
+if (invocation.kind === "doctor") {
+  process.exit(await runDoctor());
 }
 
 if (invocation.plan.kind === "headless") {

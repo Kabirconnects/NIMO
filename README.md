@@ -817,7 +817,7 @@ Errors return `{ "success": false, "error": "..." }` with `400` (invalid request
 The launcher configures and runs the stack:
 
 ```bash
-nimo setup      # write ~/.nimo/server.env (JWT_SECRET, MONGODB_URI, provider keys)
+nimo setup      # write ~/.nimo/server.env + apps/server/.env (JWT_SECRET, MONGODB_URI, provider keys)
 nimo doctor     # check runtime, configuration, and API health
 nimo            # start the API if needed, then open the chat
 nimo api        # only the API
@@ -826,8 +826,14 @@ nimo dashboard  # API + web dashboard
 
 `nimo setup` is safe to re-run: `--check` reports missing values without writing,
 `--yes` reads values from the environment instead of prompting, and `--force`
-rotates `JWT_SECRET`. Configuration lives in `~/.nimo/server.env` (mode `0600`,
-override with `NIMO_SERVER_ENV`) so it survives updates to an installed CLI.
+rotates `JWT_SECRET`. Existing values are shown during setup — the full MongoDB
+URI, the model, the port, and a masked preview of each provider key — and are
+kept when you press Enter, so re-running it never overwrites a working
+configuration by accident. Configuration lives in `~/.nimo/server.env` (mode
+`0600`, override with `NIMO_SERVER_ENV`) so it survives updates to an installed
+CLI. From a source checkout, setup also writes the server's own
+`apps/server/.env` so running the API directly from `apps/server` sees the same
+values.
 
 ### 10.6 Monorepo structure
 

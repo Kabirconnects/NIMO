@@ -76,7 +76,21 @@ function unquote(value: string): string {
   if (last <= 0) return value;
 
   const body = value.slice(1, last);
-  return first === '"' ? body.replace(/\\n/g, "\n") : body;
+  if (first === "'") return body;
+
+  // Double-quoted values may escape newlines, quotes, and backslashes.
+  return body.replace(/\\([nrt"\\])/g, (_match, char: string) => {
+    switch (char) {
+      case "n":
+        return "\n";
+      case "r":
+        return "\r";
+      case "t":
+        return "\t";
+      default:
+        return char;
+    }
+  });
 }
 
 function quote(value: string): string {
@@ -109,8 +123,10 @@ export function loadServerEnv(): void {
 }
 
 /** Keep known keys in a stable order, preserve anything the user added. */
-export function writeServerEnv(values: EnvValues): string {
-  const path = getServerEnvPath();
+export function writeServerEnv(
+  values: EnvValues,
+  path: string = getServerEnvPath(),
+): string {
   const ordered: EnvValues = {};
 
   for (const key of SERVER_ENV_KEYS) {
@@ -140,19 +156,16 @@ export function writeServerEnv(values: EnvValues): string {
   return path;
 }
 
-/** Human-readable value that never prints a secret. */
+/**
+ * Human-readable value for a config entry.
+ *
+ * Connection strings are shown in full: they are the endpoint the user needs
+ * to recognise when deciding whether to keep or replace it. API keys and
+ * secrets stay masked, because only their length matters.
+ */
 export function describeEnvValue(key: string, value: string): string {
   if (/KEY|SECRET|TOKEN|PASSWORD/i.test(key)) {
     return `set (${value.length} chars)`;
-  }
-
-  if (key === "MONGODB_URI") {
-    try {
-      const url = new URL(value);
-      return `${url.protocol}//${url.host}${url.pathname === "/" ? "" : url.pathname}`;
-    } catch {
-      return "set";
-    }
   }
 
   return value;

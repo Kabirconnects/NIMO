@@ -128,19 +128,22 @@ export async function runDoctor(): Promise<number> {
 
   const personal = readServerEnv();
   const personalPath = getServerEnvPath();
-  const repo: EnvValues =
-    root ? readEnvFile(join(root, SERVICE_DIRS.api, ".env")) : {};
+  const repoPath = root ? join(root, SERVICE_DIRS.api, ".env") : null;
+  const repo: EnvValues = repoPath ? readEnvFile(repoPath) : {};
 
   const env = Object.keys(personal).length > 0 ? personal : repo;
   const source =
     Object.keys(personal).length > 0
       ? personalPath
       : Object.keys(repo).length > 0
-        ? join(root ?? ".", SERVICE_DIRS.api, ".env")
+        ? (repoPath ?? "(missing)")
         : "(missing)";
 
   if (Object.keys(personal).length > 0) {
     line("ok", "Server env", personalPath);
+    if (repoPath && Object.keys(repo).length > 0) {
+      line("ok", "Checkout env", repoPath);
+    }
   } else if (Object.keys(repo).length > 0) {
     line("warn", "Server env", `${source} — run “nimo setup” for a personal config`);
   } else {

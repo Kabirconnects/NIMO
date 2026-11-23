@@ -14,6 +14,10 @@ export type CommandContext = {
   openModels: () => void;
   openMode: () => void;
   openEffort: () => void;
+  /** Edit the API configuration without leaving the app. */
+  openSetup: () => void;
+  /** Show the install and configuration report. */
+  openDoctor: () => void;
   showHelp: () => void;
   /** Show token usage for the current conversation. */
   showUsage: () => void;

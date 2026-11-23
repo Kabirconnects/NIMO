@@ -835,6 +835,26 @@ CLI. From a source checkout, setup also writes the server's own
 `apps/server/.env` so running the API directly from `apps/server` sees the same
 values.
 
+**First run.** When Nimo has never been configured, `nimo` offers the setup
+wizard before the chat opens: answer the MongoDB URI, the port, and one
+provider key, and the API starts with them. Answer `n` to skip — the chat
+still opens, and `/setup` is there when you are ready. The wizard is skipped
+when `NIMO_API_URL` points at a hosted API, because that install brings its own
+configuration.
+
+**Inside the chat.** The same configuration is editable without leaving the
+terminal:
+
+| Command   | What it does                                                     |
+| --------- | ---------------------------------------------------------------- |
+| `/models` | Pick the model that answers; only configured models are offered. |
+| `/setup`  | Edit the database URI, the port, the provider keys, and the model. |
+| `/doctor` | The same report `nimo doctor` prints, for runtime, configuration, and API health. |
+
+If the saved model is no longer runnable — its provider key was removed, or the
+model was renamed — the chat switches to the first configured model and tells
+you which one it picked.
+
 ### 10.6 Monorepo structure
 
 ```text

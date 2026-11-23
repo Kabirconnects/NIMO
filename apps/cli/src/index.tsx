@@ -10,7 +10,7 @@ import {
   resolveInvocation,
   runHeadless,
 } from "./features/launcher";
-import { runDoctor, runSetup } from "./features/setup";
+import { offerFirstRunSetup, runDoctor, runSetup } from "./features/setup";
 import { loadServerEnv } from "./lib/server-env";
 
 // `~/.nimo/server.env` feeds the API and the probes; real env vars still win.
@@ -47,6 +47,12 @@ if (invocation.plan.kind === "headless") {
 }
 
 // Both `nimo` and `nimo cli` start the API first, so the chat is usable.
+// A first run without any configuration gets the setup wizard here, before the
+// terminal is handed to the TUI.
+if (invocation.plan.kind === "tui") {
+  await offerFirstRunSetup();
+}
+
 if (!(await prepareTui(invocation.plan))) {
   process.exit(1);
 }

@@ -9,19 +9,28 @@ import { COLORS } from "../../../theme";
 import { getApiUrl, getConfig, updateConfig } from "../../../lib/config";
 import { useLauncher } from "../../launcher";
 import { useLogout, useSession } from "../../auth";
+import { DoctorOverlay } from "../../setup/components/doctor-overlay";
+import { SetupOverlay } from "../../setup/components/setup-overlay";
 import useChatHandler from "../handlers/chatHandler";
 import { useModels } from "../hooks/use-models";
 import { EFFORT_LABELS, MODE_LABELS, prettyModelId } from "../labels";
+import { resolveActiveModel } from "../models";
 import type { AgentMode, Effort, ModelOption } from "../types";
 import { ChatBox } from "./chat-box";
 import { MessageList } from "./message-list";
 import { UsageOverlay } from "./usage-overlay";
 import { WelcomePanel } from "./welcome-panel";
 
-/** Used only until the catalog finishes loading. */
-const FALLBACK_MODEL_ID = "anthropic/claude-sonnet-4-5";
-
-type OverlayScreen = "models" | "mode" | "effort" | "help" | "usage" | null;
+/** The screens that can be opened on top of the chat. */
+type OverlayScreen =
+  | "models"
+  | "mode"
+  | "effort"
+  | "help"
+  | "usage"
+  | "setup"
+  | "doctor"
+  | null;
 
 type Screen = "login" | "register" | "profile";
 
@@ -101,8 +110,28 @@ export function ChatPage({ onNavigate, onExit }: ChatPageProps) {
   const scrollRef = useRef<ScrollBoxRenderable>(null);
 
   const groups = models.data?.groups ?? [];
-  const resolvedModelId =
-    modelId ?? models.data?.defaultModelId ?? FALLBACK_MODEL_ID;
+
+  const allModels = useMemo(
+    () => groups.flatMap((group) => group.models),
+    [groups],
+  );
+
+  /**
+   * The model the server can actually run right now.
+   *
+   * A saved model can go stale: the provider key was removed, the model was
+   * renamed, or the catalog belongs to another install. Sending it anyway
+   * fails with "Model X is not configured", so the first usable model wins.
+   */
+  const resolvedModelId = useMemo(
+    () =>
+      resolveActiveModel(
+        modelId,
+        allModels,
+        models.data?.defaultModelId,
+      ),
+    [allModels, modelId, models.data],
+  );
 
   const modelNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -120,6 +149,32 @@ export function ChatPage({ onNavigate, onExit }: ChatPageProps) {
   }, []);
 
   const launcher = useLauncher(notify);
+
+  // A saved model that the server cannot run is repaired once, so the next
+  // turn — and the next run — start from a model that actually works.
+  useEffect(() => {
+    if (!models.data || !modelId) return;
+    if (resolvedModelId === modelId) return;
+
+    const saved = allModels.find((model) => model.id === modelId);
+    const replacement = allModels.find((model) => model.id === resolvedModelId);
+
+    if (!replacement?.configured) {
+      notify(
+        "No model is ready to use. Add a provider key with /setup and restart the API.",
+      );
+      return;
+    }
+
+    setModelId(resolvedModelId);
+    updateConfig({ modelId: resolvedModelId });
+
+    notify(
+      saved
+        ? `Model ${prettyModelId(modelId)} is not available — switched to ${prettyModelId(resolvedModelId)}.`
+        : `Switched to ${prettyModelId(resolvedModelId)}.`,
+    );
+  }, [allModels, modelId, models.data, notify, resolvedModelId]);
 
   // Notices are transient; the chat keeps the screen otherwise.
   useEffect(() => {
@@ -156,11 +211,6 @@ export function ChatPage({ onNavigate, onExit }: ChatPageProps) {
     [chat.isStreaming, chat.sendMessage, effort, mode, resolvedModelId],
   );
 
-  const allModels = useMemo(
-    () => groups.flatMap((group) => group.models),
-    [groups],
-  );
-
   const openModels = useCallback(() => {
     const preferred =
       allModels.find((model) => model.id === resolvedModelId) ??
@@ -194,6 +244,8 @@ export function ChatPage({ onNavigate, onExit }: ChatPageProps) {
     openModels,
     openMode,
     openEffort,
+    openSetup: () => setOverlay("setup"),
+    openDoctor: () => setOverlay("doctor"),
     showHelp: () => setOverlay("help"),
     showUsage: () => setOverlay("usage"),
     startBackend: launcher.startBackend,
@@ -412,6 +464,18 @@ export function ChatPage({ onNavigate, onExit }: ChatPageProps) {
       {overlay === "usage" && (
         <UsageOverlay messages={chat.messages} onClose={closeOverlay} />
       )}
+
+      {overlay === "setup" && (
+        <SetupOverlay
+          onClose={closeOverlay}
+          onSaved={(message) => {
+            closeOverlay();
+            notify(message);
+          }}
+        />
+      )}
+
+      {overlay === "doctor" && <DoctorOverlay onClose={closeOverlay} />}
     </box>
   );
 }

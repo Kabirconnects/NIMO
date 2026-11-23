@@ -94,6 +94,11 @@ export function printHelp(): void {
     "  nimo                 API + terminal chat",
     "  nimo api             Just the backend",
     "",
+    paint(ANSI.bold, "IN THE CHAT"),
+    "  /models              Choose the model that answers you",
+    "  /setup               Edit the database, the provider keys, and the model",
+    "  /doctor              Check the install and the configuration",
+    "",
     paint(ANSI.dim, `Logs: ${getLogDir()}`),
     "",
   ];

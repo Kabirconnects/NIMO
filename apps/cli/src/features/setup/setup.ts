@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import { getConfig, updateConfig } from "../../lib/config";
@@ -7,13 +6,19 @@ import {
   DEFAULT_SERVER_ENV,
   describeEnvValue,
   getServerEnvPath,
-  readEnvFile,
   readServerEnv,
   SERVER_ENV_KEYS,
   writeServerEnv,
   type EnvValues,
 } from "../../lib/server-env";
-import { findWorkspaceRoot, SERVICE_DIRS } from "../launcher/targets";
+import {
+  currentEnv,
+  describeMongoUri,
+  envTargets,
+  hasValues,
+  maskSecret,
+  repoEnv,
+} from "./config";
 import { configuredProviders, PROVIDERS, providerForModel } from "./providers";
 
 export type SetupOptions = {
@@ -70,42 +75,6 @@ function missingServerEnv(env: EnvValues): string[] {
   return missing;
 }
 
-/** The repository's own `.env`, used when running from a source checkout. */
-function repoEnvPath(): string | null {
-  const root = findWorkspaceRoot();
-  return root ? join(root, SERVICE_DIRS.api, ".env") : null;
-}
-
-function repoEnv(): EnvValues {
-  const path = repoEnvPath();
-  return path ? readEnvFile(path) : {};
-}
-
-/**
- * Files `nimo setup` writes. The personal file is always written; in a source
- * checkout the server's own `.env` is written too, so `pnpm dev` from
- * `apps/server` sees the same values as the launcher.
- */
-function envTargets(): string[] {
-  const personal = getServerEnvPath();
-  const repo = repoEnvPath();
-
-  if (!repo || resolve(repo) === resolve(personal)) return [personal];
-  return [personal, repo];
-}
-
-function hasValues(env: EnvValues): boolean {
-  return SERVER_ENV_KEYS.some((key) => Boolean(env[key]?.trim()));
-}
-
-/** Partial secret shown next to a prompt: enough to recognise, not to reuse. */
-function maskSecret(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  if (trimmed.length <= 8) return "(set)";
-  return `(${trimmed.slice(0, 4)}…${trimmed.slice(-4)})`;
-}
-
 function printExisting(env: EnvValues, targets: string[]): void {
   console.log(paint(ANSI.bold, "  Current configuration"));
   for (const target of targets) dim(`  ${target}`);
@@ -120,7 +89,7 @@ function printExisting(env: EnvValues, targets: string[]): void {
   const providers = configuredProviders(env);
 
   console.log(
-    `  ${paint(ANSI.dim, "MongoDB")}   ${describeMongo(env.MONGODB_URI)}`,
+    `  ${paint(ANSI.dim, "MongoDB")}   ${describeMongoUri(env.MONGODB_URI)}`,
   );
   console.log(
     `  ${paint(ANSI.dim, "Model")}     ${env.AI_MODEL?.trim() || "(default)"}`,
@@ -318,6 +287,89 @@ export async function runSetup(options: SetupOptions): Promise<number> {
   return finishSetup(next, baseline, options, targets);
 }
 
+/**
+ * True when the CLI is pointed at an API that is not on this machine.
+ *
+ * Such a setup brings its own configuration, so the local wizard would only
+ * ask questions whose answers nobody reads.
+ */
+function pointsAtExternalApi(): boolean {
+  const explicit = process.env.NIMO_API_URL ?? getConfig().apiUrl;
+  if (!explicit) return false;
+
+  try {
+    const url = new URL(explicit);
+    return !["localhost", "127.0.0.1", "::1", "0.0.0.0"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export type FirstRunResult = {
+  /** The app may continue starting up. */
+  continue: boolean;
+  /** The local configuration can boot the API. */
+  ready: boolean;
+};
+
+/**
+ * Offer the setup wizard when Nimo has never been configured.
+ *
+ * `nimo` used to print a hint and carry on, which left a new user staring at
+ * a chat that could not reach a model. This asks first and runs the wizard in
+ * place, so "install, run, answer three questions" is the whole journey.
+ */
+export async function offerFirstRunSetup(): Promise<FirstRunResult> {
+  const env = currentEnv();
+  if (isServerEnvReady(env)) return { continue: true, ready: true };
+
+  // A hosted API is configured on purpose; local keys are not needed.
+  if (pointsAtExternalApi()) return { continue: true, ready: true };
+
+  const interactive =
+    Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
+
+  console.log("");
+  console.log(paint(ANSI.bold, "◆ Nimo") + paint(ANSI.dim, " · first run"));
+  console.log("");
+  console.log(
+    "  Nimo needs three things before it can answer: a database, a model, and one provider key.",
+  );
+
+  if (!interactive) {
+    dim("  Run `nimo setup` to configure it.");
+    console.log("");
+    return { continue: true, ready: false };
+  }
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+  let answer: string;
+  try {
+    answer = (await rl.question("  Set it up now? [Y/n]: ")).trim().toLowerCase();
+  } finally {
+    rl.close();
+  }
+
+  if (answer !== "" && answer !== "y" && answer !== "yes") {
+    dim("  Skipped. Run `nimo setup` whenever you are ready.");
+    console.log("");
+    return { continue: true, ready: false };
+  }
+
+  await runSetup({ check: false, force: false, yes: false });
+
+  const ready = isServerEnvReady(currentEnv());
+  if (!ready) {
+    warn(
+      "Nimo is still missing some values. Run `nimo setup` again when you have them.",
+    );
+    console.log("");
+  }
+
+  return { continue: true, ready };
+}
+
 function finishSetup(
   next: EnvValues,
   saved: EnvValues,
@@ -352,7 +404,7 @@ function finishSetup(
   for (const path of paths) console.log(`  ${paint(ANSI.dim, path)}`);
   console.log("");
   console.log(
-    `  ${paint(ANSI.dim, "MongoDB")}   ${describeMongo(next.MONGODB_URI)}`,
+    `  ${paint(ANSI.dim, "MongoDB")}   ${describeMongoUri(next.MONGODB_URI)}`,
   );
   console.log(`  ${paint(ANSI.dim, "Model")}     ${next.AI_MODEL}`);
   console.log(
@@ -397,12 +449,6 @@ function targetCheck(env: EnvValues): void {
   }
 }
 
-/** The saved endpoint, shown in full so it can be compared with a new one. */
-function describeMongo(uri: string | undefined): string {
-  if (!uri?.trim()) return "(missing)";
-  return uri.trim();
-}
-
 async function askText(
   rl: ReturnType<typeof createInterface>,
   label: string,
@@ -435,7 +481,7 @@ async function askMongoUri(
   dim("  https://www.mongodb.com/products/platform/atlas-database");
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const hint = current ? ` [${describeMongo(current)}]` : "";
+    const hint = current ? ` [${describeMongoUri(current)}]` : "";
     const value = (await rl.question(`  MongoDB URI${hint}: `)).trim();
 
     if (!value) {

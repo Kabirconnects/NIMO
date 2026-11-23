@@ -35,6 +35,22 @@ export const COMMANDS: Command[] = [
     },
   },
   {
+    name: "setup",
+    description: "Edit the API configuration (database, keys, model)",
+    value: "/setup",
+    action: (ctx) => {
+      ctx.openSetup();
+    },
+  },
+  {
+    name: "doctor",
+    description: "Check the install and the configuration",
+    value: "/doctor",
+    action: (ctx) => {
+      ctx.openDoctor();
+    },
+  },
+  {
     name: "dashboard",
     description: "Start the API and open the web dashboard",
     value: "/dashboard",

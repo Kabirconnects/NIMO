@@ -13,7 +13,8 @@ import { generateToken, setTokenCookie, clearTokenCookie } from "../../lib/token
 
 export async function listUsers(req: Request, res: Response): Promise<void> {
   try {
-    // TODO: implement
+    res.status(501).json({ success: false, error: "Listing users is not available in this build" })
+    return
   } catch (error) {
     console.error("Failed to list users:", error)
     res.status(500).json({ success: false, error: "Internal server error" })
@@ -24,7 +25,8 @@ export async function listUsers(req: Request, res: Response): Promise<void> {
 
 export async function getUserById(req: Request, res: Response): Promise<void> {
   try {
-    // TODO: implement
+    res.status(501).json({ success: false, error: "Getting user details is not available in this build" })
+    return
   } catch (error) {
     console.error("Failed to get user:", error)
     res.status(500).json({ success: false, error: "Internal server error" })
@@ -138,6 +140,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     setTokenCookie(res, token)
 
     res.status(200).json({ success: true, user: toPublicUser(user) })
+    return
   } catch (error) {
     console.error("Failed to log in:", error)
     res.status(500).json({
@@ -154,6 +157,7 @@ export async function logout(_req: Request, res: Response): Promise<void> {
     // Idempotent on purpose: a client must be able to log out (drop a stale or
     // already expired cookie) without first proving it has a valid session.
     res.status(200).json({ success: true })
+    return
   } catch (error) {
     console.error("Failed to log out:", error)
     res.status(500).json({ success: false, error: "Internal server error" })
@@ -170,6 +174,7 @@ export async function getMe(req: Request, res: Response): Promise<void> {
     }
 
     res.status(200).json({ success: true, user: req.user })
+    return
   } catch (error) {
     console.error("Failed to load current user:", error)
     res.status(500).json({ success: false, error: "Internal server error" })
@@ -178,7 +183,8 @@ export async function getMe(req: Request, res: Response): Promise<void> {
 
 export async function updateUser(req: Request, res: Response): Promise<void> {
   try {
-    // TODO: implement
+    res.status(501).json({ success: false, error: "Updating users is not available in this build" })
+    return
   } catch (error) {
     console.error("Failed to update user:", error)
     res.status(500).json({ success: false, error: "Internal server error" })
@@ -187,7 +193,8 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
 
 export async function deleteUser(req: Request, res: Response): Promise<void> {
   try {
-    // TODO: implement
+    res.status(501).json({ success: false, error: "Deleting users is not available in this build" })
+    return
   } catch (error) {
     console.error("Failed to delete user:", error)
     res.status(500).json({ success: false, error: "Internal server error" })

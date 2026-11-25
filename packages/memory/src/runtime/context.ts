@@ -65,10 +65,14 @@ export function permissionsFor(
   mode: AgentMode,
   destructiveConfirmed: boolean,
 ): MemoryPermissions {
-  // Learning is not a filesystem write: every mode may record memories so the
-  // brain keeps growing. Only deletion is gated by mode + explicit human
-  // confirmation, which is what makes forgetMemory Auto-only.
-  return { write: true, delete: mode === "Auto" && destructiveConfirmed };
+  // Writes are gated by mode: only Auto may record memories.
+  //
+  // Chat and Plan run on untrusted input, and a memory written there becomes
+  // durable context for every later session - so an injected instruction could
+  // poison the brain and be replayed back to the agent forever. Reads stay open
+  // in every mode; deletion needs Auto plus explicit human confirmation.
+  const write = mode === "Auto";
+  return { write, delete: write && destructiveConfirmed };
 }
 
 const storage = new AsyncLocalStorage<MemoryRuntimeContext>();

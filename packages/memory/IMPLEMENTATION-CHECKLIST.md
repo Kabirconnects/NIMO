@@ -1,7 +1,7 @@
 # PAME Hardening — Implementation Checklist
 
 **Status:** Complete for the agreed scope, with the explicit gaps recorded below.
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-25
 **Purpose:** Durable implementation, remediation, and verification record for PAME (Persistent Associative Memory Engine).
 
 Legend: `[x]` implemented and covered by automated tests · `[~]` partially implemented,
@@ -186,6 +186,13 @@ This phase evaluates whether PAME is a reliable foundation for more advanced NIM
 - [x] Final architecture review completed as part of this remediation.
 
 ## Evidence Log
+
+- 2026-11-25 — Permission regression repaired: mode-gated memory writes restored
+  (`runtime/context.ts` → `write` only in Auto; Chat/Plan no longer receive
+  `MEMORY_WRITE_TOOLS`; Chat prompt no longer promises per-turn learning).
+  `pnpm --filter @workspace/memory run test:hardening` → 82/82; typecheck
+  (`@workspace/memory`, `@workspace/agents`) → exit 0. The 2026-11-13 change to
+  `write: true` had left this suite red (80/82) while this file still claimed 82/82.
 
 **Baseline (historical, not proof of the hardened build):**
 

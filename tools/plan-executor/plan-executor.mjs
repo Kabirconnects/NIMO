@@ -257,9 +257,13 @@ function collectFailures(output) {
 
 /**
  * Allow-list the packages pnpm refused to build, in the worktree's
- * pnpm-workspace.yaml. The file is left patched on purpose: pnpm re-runs its
- * install check before every script, and restoring the original content makes
- * every later command fail again.
+ * pnpm-workspace.yaml.
+ *
+ * The edit is surgical on purpose: rewriting the file would normalise its line
+ * endings and turn a one-line change into a whole-file diff, which then
+ * conflicts with the base branch on every rebase. The file is left patched
+ * because pnpm re-runs its install check before every script; `restoreHarnessPatches`
+ * undoes it before anything is committed.
  */
 function allowBuildsInWorktree(worktree, output) {
   const ignored = /Ignored build scripts:\s*(.+)/i.exec(output);
@@ -274,21 +278,59 @@ function allowBuildsInWorktree(worktree, output) {
   ];
   const wsFile = path.join(worktree, "pnpm-workspace.yaml");
   if (!fs.existsSync(wsFile)) return null;
-  const text = fs
-    .readFileSync(wsFile, "utf8")
-    .split(/\r?\n/)
-    .filter((l) => !/set this to true or false/.test(l))
-    .join("\n");
+  const text = fs.readFileSync(wsFile, "utf8");
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
   const add = names
     .filter((n) => !new RegExp(`^\\s*${n}:`, "m").test(text))
     .map((n) => `  ${n}: true`)
-    .join("\n");
+    .join(eol);
   if (!add) return null;
-  const patched = /allowBuilds:/.test(text)
-    ? text.replace(/allowBuilds:\n/, `allowBuilds:\n${add}\n`)
-    : `${text}\nallowBuilds:\n${add}\n`;
+  const patched = /allowBuilds:\r?\n/.test(text)
+    ? text.replace(/allowBuilds:\r?\n/, `allowBuilds:${eol}${add}${eol}`)
+    : `${text.replace(/\s*$/, "")}${eol}${eol}allowBuilds:${eol}${add}${eol}`;
   fs.writeFileSync(wsFile, patched, "utf8");
   return "pnpm-workspace.yaml";
+}
+
+/**
+ * The harness patches files for its own reasons (pnpm's build policy). Those
+ * files are tracked here so they can be restored before anything is committed -
+ * an environment fix must never end up in an item's diff.
+ */
+function patchRecordFile(stateDir) {
+  return path.join(stateDir, "harness-patched.json");
+}
+
+function readPatchRecord(stateDir) {
+  const file = patchRecordFile(stateDir);
+  if (!fs.existsSync(file)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function recordHarnessPatch(stateDir, worktree, file) {
+  const record = readPatchRecord(stateDir);
+  const list = new Set(record[worktree] ?? []);
+  list.add(file);
+  record[worktree] = [...list];
+  fs.writeFileSync(patchRecordFile(stateDir), JSON.stringify(record, null, 2), "utf8");
+}
+
+async function restoreHarnessPatches(stateDir, worktree, log) {
+  const record = readPatchRecord(stateDir);
+  const files = record[worktree] ?? [];
+  for (const file of files) {
+    // restore from the index (which still holds the pre-patch content)
+    await git(["checkout", "--", file], worktree);
+    log?.(`    restored the harness's own change to ${file}`);
+  }
+  if (files.length) {
+    delete record[worktree];
+    fs.writeFileSync(patchRecordFile(stateDir), JSON.stringify(record, null, 2), "utf8");
+  }
 }
 
 /**
@@ -301,7 +343,7 @@ function allowBuildsInWorktree(worktree, output) {
  * Returns the list of tracked files the harness patched, so the caller can keep
  * them out of the item's commit.
  */
-async function installDeps(worktree, log) {
+async function installDeps(worktree, log, stateDir) {
   const cmd = "pnpm install --frozen-lockfile --prefer-offline";
   const run = () => execCmd(cmd, { cwd: worktree, timeout: 1_800_000 });
   let r = await run();
@@ -310,6 +352,7 @@ async function installDeps(worktree, log) {
   const patchedFile = allowBuildsInWorktree(worktree, output);
   if (!patchedFile) return { ok: false, output, patched: [] };
   log("    install blocked by pnpm's build policy - allow-listing and retrying");
+  if (stateDir) recordHarnessPatch(stateDir, worktree, patchedFile);
   r = await run();
   return {
     ok: r.code === 0,
@@ -320,6 +363,7 @@ async function installDeps(worktree, log) {
 
 async function runGates({
   worktree, base, item, packageRoot, scopeRels, checklistRel, gates, baseline, onLog,
+  stateDir,
 }) {
   const failures = [];
   const notes = [];
@@ -420,7 +464,7 @@ async function runGates({
   // pnpm re-checks its install state before every script; if the worktree is
   // not installable every command fails for a reason that has nothing to do
   // with the item. Make it installable first.
-  const install = await installDeps(worktree, onLog ?? (() => {}));
+  const install = await installDeps(worktree, onLog ?? (() => {}), stateDir);
   if (!install.ok) {
     failures.push({
       gate: "command",
@@ -608,7 +652,7 @@ function parseReport(screen) {
  * then rebase the branch onto the current base. A conflict means the item is
  * genuinely blocked, and it is reported as such.
  */
-async function makeWorktree(root, branch, base) {
+async function makeWorktree(root, branch, base, stateDir, log) {
   const existing = await git(["worktree", "list", "--porcelain"], REPO_ROOT);
   const known = existing.stdout.includes(`worktree ${root.replace(/\\/g, "/")}`);
 
@@ -617,6 +661,10 @@ async function makeWorktree(root, branch, base) {
     await git(["worktree", "add", "-b", branch, root, base], REPO_ROOT, 300_000);
     return { reused: false };
   }
+
+  // Undo the harness's own environment patches from a previous run, so they
+  // are never carried into the item's commit.
+  if (stateDir) await restoreHarnessPatches(stateDir, root, log);
 
   // Preserve the previous run's work as a commit so the rebase can carry it.
   await git(["add", "-A"], root);
@@ -672,7 +720,7 @@ async function runItem(item, ctx) {
   log(`  worktree: ${worktree}`);
   log(`  scope:    ${allowed}`);
 
-  const wt = await makeWorktree(worktree, branch, base);
+  const wt = await makeWorktree(worktree, branch, base, ctx.stateDir, log);
   if (wt.reused) log("  reusing the existing worktree from a previous run");
   if (wt.conflict) {
     log(`  could not rebase the previous run's work onto the current base:\n${wt.conflict.slice(0, 400)}`);
@@ -684,7 +732,7 @@ async function runItem(item, ctx) {
   let patchedFiles = [];
   if (!fs.existsSync(path.join(worktree, "node_modules"))) {
     log("  installing dependencies in the worktree...");
-    const install = await installDeps(worktree, log);
+    const install = await installDeps(worktree, log, ctx.stateDir);
     if (!install.ok) {
       log(`  install failed:\n${install.output.split(/\r?\n/).slice(-8).join("\n")}`);
       state.items[itemId] = { status: "blocked", reason: "pnpm install failed in worktree" };
@@ -740,7 +788,7 @@ async function runItem(item, ctx) {
     log("  running mechanical gates...");
     const gateResult = await runGates({
       worktree, base, item, packageRoot, scopeRels: ctx.scopeRels, checklistRel, gates,
-      baseline: ctx.baseline, onLog: log,
+      baseline: ctx.baseline, onLog: log, stateDir: ctx.stateDir,
     });
     lastFailures = gateResult.failures;
     if (lastFailures.length) {
@@ -751,9 +799,7 @@ async function runItem(item, ctx) {
 
     // Files the harness itself patched (pnpm's build policy) must not be part
     // of the item's commit - they are environment fixes, not the worker's work.
-    for (const file of patchedFiles) {
-      await git(["checkout", "--", file], worktree);
-    }
+    if (ctx.stateDir) await restoreHarnessPatches(ctx.stateDir, worktree, log);
 
     // squash the worker's work into one commit on the item branch
     await git(["add", "-A"], worktree);
@@ -860,7 +906,7 @@ async function mergeItem(result, ctx) {
   }
 
   // re-run the commands after the rebase
-  const install = await installDeps(result.worktree, log);
+  const install = await installDeps(result.worktree, log, ctx.stateDir);
   if (!install.ok) {
     log("  post-rebase install failed");
     return { ok: false, reason: "post-rebase install failed" };

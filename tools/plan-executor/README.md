@@ -181,9 +181,13 @@ These are not hypothetical - each one broke a real run before it was fixed.
   the real one was passed over. Paths are resolved against every scoped package,
   and the item's own package wins for a file that does not exist yet — a script
   the item is going to create.
-- **A worktree holds a full `node_modules`** — tens of thousands of files. The
-  removal gets ten minutes, falls back to deleting the directory directly, and
-  says so if it still cannot be removed.
+- **A worktree holds a full `node_modules`** — tens of thousands of files. Git
+  removes them one by one, which takes minutes; the shell's own recursive
+  delete clears the same tree in seconds. The removal tries git first, then
+  deletes the directory and lets git forget it.
+- **A blocked item must say why.** "Blocked" without a reason is not a record,
+  it is a shrug — and the live state file is not kept in git. The reason goes
+  into the ledger, which is.
 - **The brief is the instruction, so the brief must be right.** Two bugs made it
   wrong: item-named paths were joined onto the checklist's package root (so the
   worker was told to edit `…\apps\server\apps\server`, which does not exist),
@@ -236,6 +240,13 @@ say which: `ITEM_STATE: complete` or `ITEM_STATE: partial` plus the exact
 remaining gap. A partial item stays `[~]`, the gap is appended to the item's
 line, and the Evidence Log records that it is still partial. The orchestrator
 never turns a partial item into a completed one.
+
+The wording follows the item. An item often states a gap ("... is not
+implemented"), so when the worker closes that gap the old wording is no longer
+true — and a ticked item whose text says the feature is missing is worse than an
+unticked one. The worker therefore reports `ITEM_TEXT: <the item's wording after
+your change>` and the orchestrator, which owns the checklist file, writes it. The
+worker never edits the checklist itself.
 
 
 - Items that must land in sequence (item B depends on A's API) should be run with

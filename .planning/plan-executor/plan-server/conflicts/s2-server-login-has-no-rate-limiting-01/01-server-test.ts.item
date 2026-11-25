@@ -1,0 +1,163 @@
+/**
+ * Smoke tests for apps/server — run with `tsx scripts/server-test.ts`.
+ * No test framework required; failures throw and exit non-zero.
+ */
+
+// IMPORTANT: Set environment variables BEFORE importing any app modules (like env.ts or app.ts)
+process.env.JWT_SECRET = "0123456789abcdef0123456789abcdef";
+process.env.AI_MODEL = "claude-sonnet-5";
+
+import { createUserSchema, loginSchema } from "../src/modules/user/users.schema.js";
+import { chatSchema } from "../src/modules/agent/agents.schema.js";
+import { createApp } from "../src/app.js";
+
+let passed = 0;
+let failed = 0;
+
+function assertTest(label: string, condition: boolean): void {
+  if (condition) {
+    console.log(`  ✓ ${label}`);
+    passed++;
+  } else {
+    console.error(`  ✗ ${label}`);
+    failed++;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// createUserSchema
+// ---------------------------------------------------------------------------
+console.log("createUserSchema");
+
+{
+  const r = createUserSchema.safeParse({
+    name: "Ada Lovelace",
+    email: "ada@example.com",
+    password: "secretsecret",
+  });
+  assertTest("valid user parses successfully", r.success);
+}
+
+{
+  const r = createUserSchema.safeParse({
+    name: "",
+    email: "not-an-email",
+    password: "short",
+  });
+  assertTest("invalid user is rejected", !r.success);
+}
+
+{
+  const r = createUserSchema.safeParse({
+    name: "Ada",
+    email: "ADA@EXAMPLE.COM",
+    password: "secretsecret",
+    role: "admin",
+  });
+  assertTest("email is lowercased", r.success && r.data.email === "ada@example.com");
+}
+
+// ---------------------------------------------------------------------------
+// loginSchema
+// ---------------------------------------------------------------------------
+console.log("loginSchema");
+
+{
+  const r = loginSchema.safeParse({ email: "ada@example.com", password: "x" });
+  assertTest("login allows single-char password", r.success);
+}
+
+{
+  const r = loginSchema.safeParse({ email: "bad", password: "x" });
+  assertTest("login rejects invalid email", !r.success);
+}
+
+// ---------------------------------------------------------------------------
+// chatSchema
+// ---------------------------------------------------------------------------
+console.log("chatSchema");
+
+{
+  const r = chatSchema.safeParse({ prompt: "hello" });
+  assertTest("chat with only prompt is valid", r.success);
+}
+
+{
+  const r = chatSchema.safeParse({ prompt: "" });
+  assertTest("chat with empty prompt is rejected", !r.success);
+}
+
+{
+  const r = chatSchema.safeParse({ prompt: "hi", mode: "Chat" });
+  assertTest("chat with mode Chat is valid", r.success);
+}
+
+{
+  const r = chatSchema.safeParse({ prompt: "hi", mode: "Invalid" });
+  assertTest("chat with unknown mode is rejected", !r.success);
+}
+
+// ---------------------------------------------------------------------------
+// Login Rate Limiting
+// ---------------------------------------------------------------------------
+console.log("login rate limit");
+
+async function runRateLimitTest() {
+  const app = createApp();
+  const server = app.listen(0);
+  const address = server.address();
+  const port = typeof address === "object" && address !== null ? address.port : 4000;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    // 1. Invalid body request returns 400 and doesn't affect limit state
+    const badRes = await fetch(`${baseUrl}/users/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "not-an-email", password: "" }),
+      signal: AbortSignal.timeout(5000),
+    });
+    assertTest("invalid login body returns 400", badRes.status === 400);
+
+    // 2. Send failed login attempts with invalid email structure to be answered by validation before any query / DB access
+    const loginPayload = { email: "not-an-email", password: "wrongpassword" };
+    for (let i = 1; i <= 4; i++) {
+      const res = await fetch(`${baseUrl}/users/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(loginPayload),
+        signal: AbortSignal.timeout(5000),
+      });
+      assertTest(`login attempt ${i} returns 400`, res.status === 400);
+    }
+
+    // 3. 5th attempt with invalid email format is rate limited (429) because IP is rate limited
+    const limitedRes = await fetch(`${baseUrl}/users/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(loginPayload),
+      signal: AbortSignal.timeout(5000),
+    });
+    assertTest("5th login attempt returns 429 Too Many Requests", limitedRes.status === 429);
+
+    const json = await limitedRes.json() as { success: boolean; error: string };
+    assertTest("rate limit response has success: false", json.success === false);
+    assertTest("rate limit response has error message", json.error.includes("Too many login attempts"));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Summary
+  // ---------------------------------------------------------------------------
+  console.log(`\nResults: ${passed} passed, ${failed} failed`);
+
+  if (failed > 0) {
+    process.exit(1);
+  }
+}
+
+runRateLimitTest().catch((err) => {
+  console.error("Rate limit test failed:", err);
+  process.exit(1);
+});

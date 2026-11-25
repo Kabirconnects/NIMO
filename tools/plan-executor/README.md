@@ -100,6 +100,18 @@ conflict) but the work itself had already passed every gate and the independent
 review, this merges it without running the worker again. The gates are still
 re-run after the rebase, so nothing is merged on trust.
 
+## Self-test
+
+```sh
+node tools/plan-executor/selftest.mjs
+```
+
+The harness decides where the worker should look and what an item actually is.
+Those two decisions are worth checking on their own, so they are: the
+self-test covers the path resolution (a checklist that spans several packages
+has no single "its" package) and the checklist parsing (item ids, multi-line
+items, item state).
+
 ## Item ids
 
 Ids are derived from the checklist section and position, e.g.

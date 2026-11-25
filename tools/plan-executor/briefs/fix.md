@@ -39,6 +39,9 @@ other worktrees. Stay strictly inside your worktree.
 5. Do not edit the checklist or any evidence log. Do not commit.
 6. The worktree may already contain your previous attempt's changes. Keep them if they are
    right, replace them if they caused a failure.
+   When the item text describes a state that is only *partly* reached ("X is covered;
+   Y is not implemented"), the work is to close the gap the item names - not to redo
+   what it says already works.
 7. Every path in this brief is **relative to the worktree root** below, and the worktree is
    the only place you read and write. If a path does not exist there, look for it inside
    the worktree — never read or write anything outside it, and never guess a directory

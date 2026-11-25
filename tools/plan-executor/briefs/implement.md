@@ -13,6 +13,9 @@ repository: other agents work in other worktrees. Stay strictly inside your work
    read it first: keep what is right, fix what is wrong, do not start over. The
    orchestrator judges the final diff, not your effort.
 1. Implement the item **completely**. There is no partial credit and no "follow-up item".
+   When the item text describes a state that is only *partly* reached ("X is covered;
+   Y is not implemented"), the work is to close the gap the item names - not to redo
+   what it says already works.
 2. **No leftovers.** Your diff must not contain any of these strings on added lines:
    `TODO`, `FIXME`, `XXX`, `HACK`, `not implemented`, `unimplemented`, `@ts-ignore`,
    `@ts-expect-error`, `stub`. Do not leave placeholder bodies, empty catch blocks,

@@ -1,10 +1,10 @@
-// apps/web/scripts/web-test.ts
 /**
  * Smoke tests for apps/web — run with `tsx scripts/web-test.ts`.
  * No test framework needed; failures throw and exit non-zero.
  */
 
 import { initials } from "../src/lib/initials.js";
+import { runSessionStateTests } from "../src/features/auth/utils/session-state.test.js";
 
 let passed = 0;
 let failed = 0;
@@ -27,6 +27,8 @@ assert("whitespace-only returns '?'", initials("   ") === "?");
 assert("extra words are ignored (only first two)", initials("Ann Bob Cee") === "AB");
 assert("already uppercase stays uppercase", initials("ADA LOVELACE") === "AL");
 assert("leading/trailing whitespace is trimmed", initials("  Jane  Doe  ") === "JD");
+
+runSessionStateTests(assert);
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

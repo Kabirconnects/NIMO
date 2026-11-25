@@ -3,11 +3,12 @@ import axios from "axios"
 
 import apiClient from "@/lib/api-client"
 import type { AuthResponse, User } from "../types"
+import { determineSessionState } from "../utils/session-state"
 
 export const sessionQueryKey = ["auth", "session"] as const
 
 function useSession() {
-  return useQuery<User | null>({
+  const query = useQuery<User | null>({
     queryKey: sessionQueryKey,
     queryFn: async () => {
       try {
@@ -29,9 +30,29 @@ function useSession() {
       }
     },
     // A guest's 401 must resolve to `null` instead of being retried.
-    retry: false,
+    retry: (failureCount, error) => {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status
+        if (status === 401 || status === 403) {
+          return false
+        }
+      }
+      return failureCount < 3
+    },
     staleTime: 60_000,
   })
+
+  const sessionState = determineSessionState(
+    query.isPending,
+    query.isError,
+    query.error,
+    query.data
+  )
+
+  return {
+    ...query,
+    sessionState,
+  }
 }
 
 export { useSession }

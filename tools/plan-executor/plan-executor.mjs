@@ -1893,13 +1893,30 @@ function seedEnvFiles(worktree, scopeRels, log) {
 
 async function runItem(item, ctx) {
   const {
-    args, base, packageRoot, checklistRel, checklistAbs, gates, state, log,
+    args, baseRef, packageRoot, checklistRel, checklistAbs, gates, state, log,
   } = ctx;
   const itemId = item.id;
   const branch = `plan/${itemId}`;
   const worktree = path.join(ctx.worktreeRoot, itemId);
   const briefDir = path.join(os.tmpdir(), "nimo-plan", ctx.planId, itemId);
   fs.mkdirSync(briefDir, { recursive: true });
+
+  // The item's base is the tip of the base branch AT THE MOMENT THIS ITEM
+  // STARTS - not the SHA the whole run started from.
+  //
+  // The branch is cut from this commit and the gates diff against it, so the
+  // diff is exactly this item's work: nothing that main gained in the
+  // meantime can be mistaken for the worker's changes. And because the branch
+  // already sits on the tip, the rebase at merge time has nothing to do - so
+  // an item that starts after the previous one merged does not conflict with
+  // it at all.
+  //
+  // It used to be the startup SHA, which meant every item after the first was
+  // rebased onto a base that had moved, and two items that touched the same
+  // file (every memory item touches the package's package.json) had to go
+  // through a conflict resolver and a full re-verification. Fourteen items
+  // meant fourteen conflicts to resolve for no reason.
+  const base = (await git(["rev-parse", baseRef], REPO_ROOT)).stdout.trim();
 
   const scopeRoots = ctx.scopeRoots ?? [packageRoot];
   // The scope is what the gate enforces: the packages an item may touch.
@@ -1910,6 +1927,7 @@ async function runItem(item, ctx) {
 
   log(`  worktree: ${worktree}`);
   log(`  scope:    ${allowed}`);
+  log(`  base:     ${base.slice(0, 7)} (the tip of ${baseRef} when this item started)`);
   if (focus.length) log(`  focus:    ${focus.join(", ")}`);
 
   const wt = await makeWorktree(worktree, branch, base, ctx.stateDir, log);

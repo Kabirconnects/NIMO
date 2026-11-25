@@ -20,6 +20,7 @@ import {
   parseReport,
   hasTrailer,
   resolveCommandListConflict,
+  findFailingScripts,
 } from "./plan-executor.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -534,6 +535,60 @@ check(
   ),
   null,
 );
+
+// ---------------------------------------------------------------------------
+// naming the script a failure came from
+// ---------------------------------------------------------------------------
+//
+// The worker is told to run the failing script on its own - the suite's
+// output is collapsed and a failing assertion is invisible in it. The suite
+// names the assertion, not the file, so the harness looks the file up.
+
+const fixtureRoot = path.join(
+  HERE,
+  "..",
+  "..",
+  ".planning",
+  "plan-executor",
+  "selftest-fixture",
+);
+const fixturePkg = path.join(fixtureRoot, "packages", "memory");
+fs.mkdirSync(path.join(fixturePkg, "scripts"), { recursive: true });
+fs.writeFileSync(
+  path.join(fixturePkg, "scripts", "policy-settings-test.ts"),
+  [
+    'check(isRetrievable(memOld, OWNER, p5) === false, "[EVIDENCE AGE] memory with evidence older than maxEvidenceAgeDays is NOT retrievable");',
+    "",
+  ].join("\n"),
+  "utf8",
+);
+fs.writeFileSync(
+  path.join(fixturePkg, "scripts", "other-test.ts"),
+  'check(x === 1, "[OTHER] something else");',
+  "utf8",
+);
+
+check(
+  "the script a failing assertion came from is found",
+  findFailingScripts(fixtureRoot, fixturePkg, [
+    "[EVIDENCE AGE] memory with evidence older than maxEvidenceAgeDays is NOT retrievable",
+  ]),
+  ["packages/memory/scripts/policy-settings-test.ts"],
+);
+
+check(
+  "a failure from another script finds that script",
+  findFailingScripts(fixtureRoot, fixturePkg, ["[OTHER] something else"]),
+  ["packages/memory/scripts/other-test.ts"],
+);
+
+check(
+  "a failure from no script finds nothing",
+  findFailingScripts(fixtureRoot, fixturePkg, ["[NOPE] never happened"]),
+  [],
+);
+
+fs.rmSync(fixtureRoot, { recursive: true, force: true });
 
 // ---------------------------------------------------------------------------
 

@@ -395,6 +395,52 @@ function collectFailures(output) {
 }
 
 /**
+ * Find the test file that produced these failures.
+ *
+ * The suite's output names the failing assertion ("[EVIDENCE AGE] memory
+ * with evidence older than maxEvidenceAgeDays is NOT retrievable") and not
+ * the file it came from. The worker is told to run the failing script on its
+ * own - because the suite's output is collapsed and a failing assertion is
+ * invisible in it - but the worker can only do that if it knows WHICH script.
+ * So the harness finds it: the assertion's own name is in the source of the
+ * test that makes it.
+ *
+ * The label in square brackets is the most distinctive part of a name, so it
+ * is what is looked for; a name without one falls back to its longest words.
+ */
+function findFailingScripts(worktree, packageRoot, failureNames) {
+  if (!failureNames?.length) return [];
+  const scriptsDir = path.join(packageRoot, "scripts");
+  let entries = [];
+  try {
+    entries = fs.readdirSync(scriptsDir).filter((f) => /\.(test|spec)\.[jt]sx?$|-test\.[jt]sx?$/.test(f));
+  } catch {
+    return [];
+  }
+  const needles = failureNames.map((name) => {
+    const label = /\[([^\]]+)\]/.exec(name);
+    if (label) return label[1];
+    return name
+      .split(/\s+/)
+      .filter((w) => w.length >= 8)
+      .sort((a, b) => b.length - a.length)[0] ?? name;
+  });
+  const hits = [];
+  for (const file of entries) {
+    let text = "";
+    try {
+      text = fs.readFileSync(path.join(scriptsDir, file), "utf8");
+    } catch {
+      continue;
+    }
+    if (needles.some((n) => n && text.includes(n))) {
+      hits.push(path.relative(worktree, path.join(scriptsDir, file)).replace(/\\/g, "/"));
+    }
+  }
+  return hits;
+}
+
+/**
  * The test commands that actually exercise the packages an item changed.
  *
  * The proof has to run the tests of the package that was changed. Running the
@@ -1018,9 +1064,19 @@ async function runGates({
 
     if (r.code !== 0) {
       if (newFailures.length) {
+        // Name the script the failure came from. The worker is told to run
+        // the failing script on its own - the suite's output is collapsed and
+        // a failing assertion is invisible in it - but the suite's output
+        // names the assertion, not the file. So the harness looks the file
+        // up: the assertion's own name is in the source of the test that
+        // makes it.
+        const scripts = findFailingScripts(worktree, packageRoot, newFailures);
+        const where = scripts.length
+          ? ` The failing script is ${scripts.join(", ")} - run that on its own.`
+          : "";
         failures.push({
           gate: "command",
-          detail: `\`${cmd}\` exited ${r.code} with NEW failures: ${newFailures.slice(0, 5).join(" | ")}`,
+          detail: `\`${cmd}\` exited ${r.code} with NEW failures: ${newFailures.slice(0, 5).join(" | ")}.${where}`,
         });
       } else if (!currentFailures.length) {
         // The command died without reporting any named failure - a crash, a
@@ -2862,4 +2918,5 @@ export {
   parseReport,
   hasTrailer,
   resolveCommandListConflict,
+  findFailingScripts,
 };

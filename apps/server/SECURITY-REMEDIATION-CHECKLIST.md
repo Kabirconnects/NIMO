@@ -81,7 +81,7 @@ touch, and S0 is what creates one.
 
 ## S5 — Web: a transient 5xx logs the user out
 
-- [ ] `apps/web/src/features/auth/hooks/use-session.ts:32` sets `retry: false` and
+- [x] `apps/web/src/features/auth/hooks/use-session.ts:32` sets `retry: false` and
       `apps/web/src/features/auth/components/protected-route.tsx:28` redirects on
       `if (!user)`; `isError` is never checked. A server hiccup therefore signs the user out.
       Distinguish "not signed in" from "could not check", and only redirect on the
@@ -113,6 +113,7 @@ touch, and S0 is what creates one.
 ---
 
 ## Evidence Log
+- 2026-11-25 — s5-web-a-transient-5xx-logs-the-user-out-01: `apps/web/src/features/auth/hooks/use-session.ts:32` sets `retry: false` and `apps/web/src (pnpm --filter @workspace/server run typecheck => exit 0; pnpm --filter @workspace/server run lint => exit 0; pnpm --filter @workspace/server run test:all => exit 0; pnpm --filter web run typecheck => exit 0; pnpm --filter web run lint => exit 0; pnpm --filter web run test => exit 0; pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; pnpm --filter @workspace/agents run typecheck => exit 0; pnpm --filter @workspace/agents run lint => exit 0; pnpm --filter @workspace/agents run test => exit 0; 5 file(s) changed; proof: the test cannot load without the change (it imports a module the old code does not have), so it pins the new code; independent review: PASS).
 - 2026-11-25 — s4-agents-command-reuse-collides-on-the--01: `packages/agents/src/tools/shared/process.ts:589` builds `commandLine = argv.join(" ")`, m (pnpm --filter @workspace/server run typecheck => exit 0; pnpm --filter @workspace/server run lint => exit 0; pnpm --filter @workspace/server run test:all => exit 0; pnpm --filter web run typecheck => exit 0; pnpm --filter web run lint => exit 0; pnpm --filter web run test => exit 0; pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; pnpm --filter @workspace/agents run typecheck => exit 0; pnpm --filter @workspace/agents run lint => exit 0; pnpm --filter @workspace/agents run test => exit 0; 2 file(s) changed; independent review: PASS).
 - 2026-11-25 — s0-prerequisite-the-packages-under-this--01: `apps/server`, `apps/web` and `packages/agents` currently have **no automated tests at all (pnpm --filter @workspace/server run typecheck => exit 0; pnpm --filter @workspace/server run lint => exit 0; pnpm --filter @workspace/server run test => exit 0; pnpm --filter web run typecheck => exit 0; pnpm --filter web run lint => exit 0; pnpm --filter web run test => exit 0; pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; pnpm --filter @workspace/agents run typecheck => exit 0; pnpm --filter @workspace/agents run lint => exit 0; pnpm --filter @workspace/agents run test => exit 0; 9 file(s) changed; independent review: PASS).
 

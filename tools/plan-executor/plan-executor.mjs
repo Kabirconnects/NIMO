@@ -450,6 +450,53 @@ function proofCommandsFor(sourceChanged, gates, root) {
  * "before" behaviour for them to contradict.
  */
 /**
+ * The last line of a checklist item's block.
+ *
+ * An item is its first line plus the indented lines below it. When the item's
+ * wording is replaced, the whole block has to go - otherwise the old detail
+ * hangs under the new sentence.
+ */
+function itemBlockEnd(lines, start) {
+  let end = start;
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) break;
+    if (/^\s*-\s*\[( |x|~)\]\s+/.test(line)) break;
+    if (/^#{1,6}\s+/.test(line)) break;
+    if (!/^\s+/.test(line)) break;
+    end = i;
+  }
+  return end;
+}
+
+/**
+ * Write an item's outcome into the checklist.
+ *
+ * The item's wording may have changed: a checklist item often states a gap
+ * ("... is not implemented"), and when the worker closes that gap the wording
+ * is no longer true. A ticked item whose text says the feature is missing is
+ * worse than an unticked one, so the worker's reported wording replaces the
+ * item's whole block.
+ */
+function applyItemOutcome(lines, idx, { itemText, partial, remaining }) {
+  const reported = (itemText ?? "").replace(/\s+/g, " ").trim().slice(0, 400);
+  if (reported) {
+    const end = itemBlockEnd(lines, idx);
+    const gap = partial && remaining ? ` — remaining: ${remaining}` : "";
+    lines.splice(idx, end - idx + 1, `- [${partial ? "~" : "x"}] ${reported}${gap}`);
+    return lines;
+  }
+  if (partial) {
+    // A partial item stays partial: keep [~] and state what still stands in the way.
+    const gap = remaining ? ` — remaining: ${remaining}` : "";
+    lines[idx] = lines[idx].replace(/^- \[.\]/, "- [~]").replace(/\s*$/, "") + gap;
+  } else {
+    lines[idx] = lines[idx].replace(/^- \[( |~)\]/, "- [x]");
+  }
+  return lines;
+}
+
+/**
  * The names a module exports.
  *
  * Used by the proof: when the old source is put back and the test dies with
@@ -1280,6 +1327,13 @@ function parseReport(screen) {
     status: last(/STATUS:\s*(done|blocked)/gi)?.toLowerCase() ?? null,
     itemState: last(/ITEM_STATE:\s*(complete|partial)/gi)?.toLowerCase() ?? null,
     remaining: last(/REMAINING:\s*(.+)/gi)?.trim() ?? null,
+    // The item's wording after the change. A checklist item often states a
+    // gap ("... is not implemented"); when the worker closes that gap, the
+    // wording is no longer true, and a ticked item whose text says the feature
+    // is missing is worse than an unticked one. The orchestrator owns the
+    // checklist file, so the worker *reports* the new wording and the
+    // orchestrator writes it.
+    itemText: last(/ITEM_TEXT:\s*(.+)/gi)?.trim() ?? null,
     verdict: last(/VERDICT:\s*(PASS|FAIL)/gi)?.toUpperCase() ?? null,
     resolved: last(/RESOLVED:\s*(yes|no)/gi)?.toLowerCase() ?? null,
     conflicts: last(/CONFLICTS:\s*(.+)/gi)?.trim() ?? null,
@@ -1666,16 +1720,30 @@ async function makeWorktree(root, branch, base, stateDir, log) {
 }
 
 async function removeWorktree(root, branch, log) {
-  // A worktree holds a full node_modules - tens of thousands of files - so
-  // the removal takes minutes on Windows. git gives up when it times out and
-  // leaves the directory behind (deregistered, but still on disk).
-  const r = await git(["worktree", "remove", "--force", root], REPO_ROOT, 600_000);
+  // A worktree holds a full node_modules - tens of thousands of files. On
+  // Windows, `git worktree remove` walks that tree file by file and takes
+  // minutes; the shell's own recursive delete clears the same tree in seconds.
+  // So: let git try, and if it is still slow, delete the directory and let
+  // git forget it (prune removes the registration once the directory is gone).
+  const r = await git(["worktree", "remove", "--force", root], REPO_ROOT, 180_000);
   if (r.code !== 0 || fs.existsSync(root)) {
+    // A removal that was cut short can leave the worktree locked, and a locked
+    // worktree is never pruned.
+    await git(["worktree", "unlock", path.basename(root)], REPO_ROOT, 60_000);
     await git(["worktree", "prune"], REPO_ROOT, 120_000);
-    try {
-      fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
-    } catch {
-      /* reported below */
+    if (fs.existsSync(root)) {
+      const fast = await execCmd(
+        `cmd /c rmdir /s /q "${root}"`,
+        { cwd: REPO_ROOT, timeout: 300_000 },
+      );
+      if (fast.code !== 0) {
+        try {
+          fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+        } catch {
+          /* reported below */
+        }
+      }
+      await git(["worktree", "prune"], REPO_ROOT, 120_000);
     }
   }
   await git(["branch", "-D", branch], REPO_ROOT, 60_000);
@@ -1899,6 +1967,7 @@ async function runItem(item, ctx) {
       proof: gateResult.proofDetail ?? null,
       itemState: report.itemState ?? "complete",
       remaining: report.remaining ?? null,
+      itemText: report.itemText ?? null,
       reviewer: reviewerAddress,
       implementer: implementer.address,
     };
@@ -2043,13 +2112,11 @@ async function mergeItem(result, ctx) {
   const idx = lines.findIndex((l) => l.includes(item.head.slice(0, 60)));
   const partial = result.itemState === "partial";
   if (idx >= 0) {
-    if (partial) {
-      // A partial item stays partial: keep [~] and state what still stands in the way.
-      const gap = result.remaining ? ` — remaining: ${result.remaining}` : "";
-      lines[idx] = lines[idx].replace(/^- \[.\]/, "- [~]").replace(/\s*$/, "") + gap;
-    } else {
-      lines[idx] = lines[idx].replace(/^- \[( |~)\]/, "- [x]");
-    }
+    applyItemOutcome(lines, idx, {
+      itemText: result.itemText,
+      partial,
+      remaining: result.remaining,
+    });
   }
   const evidenceIdx = lines.findIndex((l) => /^#{1,6}\s+evidence log/i.test(l));
   const summary = result.commandResults
@@ -2257,7 +2324,15 @@ async function main() {
   results.sort((a, b) => (order.get(a.itemId) ?? 0) - (order.get(b.itemId) ?? 0));
   for (const entry of results) {
     if (entry.status !== "ready") {
-      log(`${entry.itemId}: blocked, left in place for inspection`);
+      // The reason belongs in the durable record, not only in the live state
+      // file: "blocked" without "why" is not a record, it is a shrug.
+      const why = (entry.failures ?? [])
+        .map((f) => `${f.gate}: ${f.detail}`)
+        .join(" | ");
+      log(
+        `${entry.itemId}: blocked, left in place for inspection` +
+          (why ? ` — ${why.slice(0, 900)}` : ""),
+      );
       continue;
     }
     ctx.item = entry.item;
@@ -2294,4 +2369,5 @@ export {
   collectFailures,
   patchSignature,
   removedGuards,
+  applyItemOutcome,
 };

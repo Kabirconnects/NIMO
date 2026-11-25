@@ -9,7 +9,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { itemPaths, parseChecklist, slug, removedGuards } from "./plan-executor.mjs";
+import {
+  itemPaths,
+  parseChecklist,
+  slug,
+  removedGuards,
+  applyItemOutcome,
+} from "./plan-executor.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..");
@@ -176,6 +182,48 @@ check(
 );
 
 check("a diff with no removed lines has no guards", removedGuards(""), []);
+
+// ---------------------------------------------------------------------------
+// applyItemOutcome: an item that closes a gap must not keep claiming it
+// ---------------------------------------------------------------------------
+
+const outcomeLines = () => [
+  "## A section",
+  "",
+  "- [~] Working memory: no dedicated type; approximated by `ephemeral` retention.",
+  "      The detail of the item continues here.",
+  "- [ ] Another item.",
+];
+
+check(
+  "a closed gap replaces the item's wording and its whole block",
+  applyItemOutcome(outcomeLines(), 2, {
+    itemText: "Working memory has its own type.",
+    partial: false,
+    remaining: null,
+  }).slice(2, 4),
+  ["- [x] Working memory has its own type.", "- [ ] Another item."],
+);
+
+check(
+  "an item that stays partial keeps its box and states the gap",
+  applyItemOutcome(outcomeLines(), 2, {
+    itemText: "Working memory: a dedicated type exists, the read path is not wired.",
+    partial: true,
+    remaining: "the read path is not wired",
+  })[2],
+  "- [~] Working memory: a dedicated type exists, the read path is not wired. — remaining: the read path is not wired",
+);
+
+check(
+  "without a reported wording the box is the only thing that changes",
+  applyItemOutcome(outcomeLines(), 2, {
+    itemText: null,
+    partial: false,
+    remaining: null,
+  })[2],
+  "- [x] Working memory: no dedicated type; approximated by `ephemeral` retention.",
+);
 
 // ---------------------------------------------------------------------------
 

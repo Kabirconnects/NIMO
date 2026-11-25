@@ -78,6 +78,7 @@ Finish your message with exactly these lines, and nothing after them:
 ITEM: {{ITEM_ID}}
 STATUS: done
 ITEM_STATE: complete | partial
+ITEM_TEXT: <the item's wording after your change - one line>
 CHANGED: <comma-separated list of the files you changed>
 TESTS: <one line per gate command with its exit code, e.g. "typecheck => exit 0">
 ```
@@ -89,6 +90,12 @@ way — in that case add one more line:
 ```
 REMAINING: <what is still missing, in one sentence>
 ```
+
+`ITEM_TEXT` is the item's wording **after** your change. An item often states a gap
+("... is not implemented"); if you closed that gap, the old wording is no longer true,
+so say what is true now, in one line, in the same voice as the item. The orchestrator
+writes it — you do not edit the checklist yourself. If the wording did not change,
+repeat the item text as it is.
 
 If you cannot finish the item without breaking a rule, end with:
 

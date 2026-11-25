@@ -237,7 +237,7 @@ This phase evaluates whether PAME is a reliable foundation for more advanced NIM
 - [x] Final architecture review completed as part of this remediation.
 
 ## Evidence Log
-- 2026-11-25 — p0-7-policy-settings-that-still-have-no--01: The owner's policy reaches the write paths, but three of its settings are still read by no (NOT COMPLETED — the gates did not pass, so nothing was merged: command: `pnpm --filter @workspace/memory run test:all` exited 1 with NEW failures: [EVIDENCE AGE] memory with evidence older than maxEvidenceAgeDays is NOT retrievable | [EVIDENCE AGE] old evidence memory is retrievable for owner with no limits; the item stays open).
+- 2026-11-25 — p0-7-policy-settings-that-still-have-no--01: The owner's policy reaches the write paths, but three of its settings are still read by no (NOT ATTEMPTED — no worker could run (provider: the model provider is rate-limited for 7h 2m 44s - no worker can run until it resets); the item stays open).
 - 2026-11-25 — c-temporal-memory-03: Interval population is not automatic; only correction/supersession and deletion set validi (pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; 7 file(s) changed; independent review: PASS).
 - 2026-11-25 — p3-verification-regression-10: Concurrency test (two writers on one SQLite DB) — SQLite serialises writes in this single- (pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; 2 file(s) changed; independent review: PASS).
 

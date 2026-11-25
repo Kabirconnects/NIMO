@@ -329,3 +329,138 @@
 {"ts":"2026-11-25T12:58:50.915Z","msg":"  recorded 1 blocked item(s) in the Evidence Log"}
 {"ts":"2026-11-25T12:58:50.916Z","msg":"\nsummary: 2 merged, 1 blocked"}
 {"ts":"2026-11-25T12:58:50.916Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}
+{"ts":"2026-11-25T13:16:43.256Z","msg":"\n=== p0-7-policy-settings-that-still-have-no--01 (open) P0.7 Policy settings that still have no effect ==="}
+{"ts":"2026-11-25T13:16:43.305Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\p0-7-policy-settings-that-still-have-no--01"}
+{"ts":"2026-11-25T13:16:43.305Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory"}
+{"ts":"2026-11-25T13:16:43.305Z","msg":"  base:     d1e29b8 (the tip of main when this item started)"}
+{"ts":"2026-11-25T13:16:43.305Z","msg":"  focus:    packages/memory/package.json, packages/memory/src/storage/db.ts, packages/memory/src/domain/governance.types.ts, packages/memory/src/governance/policy.ts, packages/memory/src/retrieval/activate.ts, packages/memory/src/graph/evolve.ts, packages/memory/src/retrieval/search.ts:108,182, packages/memory/src/graph/planner.ts:51,85,98, packages/memory/scripts/<name>-test.ts, packages/memory/src/retrieval/search.ts, packages/memory/src/graph/planner.ts"}
+{"ts":"2026-11-25T13:16:43.694Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T13:16:43.695Z","msg":"  the previous run failed with: command"}
+{"ts":"2026-11-25T13:16:43.695Z","msg":"  starting from the fix brief, with those failures in it"}
+{"ts":"2026-11-25T13:16:52.682Z","msg":"  implementer: t3n"}
+{"ts":"2026-11-25T13:16:52.684Z","msg":"  attempt 2: briefing implementer"}
+{"ts":"2026-11-25T13:19:37.510Z","msg":"  note: the worker did not end with a status trailer - judging the diff alone"}
+{"ts":"2026-11-25T13:19:37.511Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T13:19:38.466Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T13:19:41.105Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T13:19:43.357Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T13:19:48.363Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T13:19:54.052Z","msg":"    proof: the tests fail without the change (3 new failure(s))"}
+{"ts":"2026-11-25T13:19:54.348Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T13:19:54.348Z","msg":"  the worker said: no status trailer; changed: false } without changing anything; \"user_correction\" is the user acting, so it still works. - Every"}
+{"ts":"2026-11-25T13:19:56.910Z","msg":"  implementer: t3p"}
+{"ts":"2026-11-25T13:19:56.912Z","msg":"  attempt 3: briefing implementer"}
+{"ts":"2026-11-25T13:23:07.562Z","msg":"  note: the worker did not end with a status trailer - judging the diff alone"}
+{"ts":"2026-11-25T13:23:07.563Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T13:23:08.419Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T13:23:11.014Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T13:23:13.014Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T13:23:17.886Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T13:23:23.628Z","msg":"    proof: the tests fail without the change (3 new failure(s))"}
+{"ts":"2026-11-25T13:23:23.916Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T13:23:23.916Z","msg":"  the worker said: no status trailer; changed: false } without changing anything; \"user_correction\" is the user acting, so it still works. - Every"}
+{"ts":"2026-11-25T13:23:24.142Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T13:23:24.143Z","msg":"p0-7-policy-settings-that-still-have-no--01: blocked, left in place for inspection — command: `pnpm --filter @workspace/memory run test:all` exited 1 with NEW failures: [EVIDENCE AGE] memory with evidence older than maxEvidenceAgeDays is NOT retrievable | [EVIDENCE AGE] old evidence memory is retrievable for owner with no limits"}
+{"ts":"2026-11-25T13:23:24.244Z","msg":"  recorded 1 blocked item(s) in the Evidence Log"}
+{"ts":"2026-11-25T13:23:24.244Z","msg":"  (the checklist commit failed: )"}
+{"ts":"2026-11-25T13:23:24.245Z","msg":"\nsummary: 2 merged, 1 blocked"}
+{"ts":"2026-11-25T13:23:24.245Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}
+{"ts":"2026-11-25T14:14:50.150Z","msg":"\n=== batch 1: p0-7-policy-settings-that-still-have-no--01 ==="}
+{"ts":"2026-11-25T14:14:50.156Z","msg":"\n=== p0-7-policy-settings-that-still-have-no--01 (open) P0.7 Policy settings that still have no effect ==="}
+{"ts":"2026-11-25T14:14:50.200Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\p0-7-policy-settings-that-still-have-no--01"}
+{"ts":"2026-11-25T14:14:50.200Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory"}
+{"ts":"2026-11-25T14:14:50.200Z","msg":"  base:     62fabdb (the tip of main when this item started)"}
+{"ts":"2026-11-25T14:14:50.200Z","msg":"  focus:    packages/memory/package.json, packages/memory/src/storage/db.ts, packages/memory/src/domain/governance.types.ts, packages/memory/src/governance/policy.ts, packages/memory/src/retrieval/activate.ts, packages/memory/src/graph/evolve.ts, packages/memory/src/retrieval/search.ts:108,182, packages/memory/src/graph/planner.ts:51,85,98, packages/memory/scripts/<name>-test.ts, packages/memory/src/retrieval/search.ts, packages/memory/src/graph/planner.ts"}
+{"ts":"2026-11-25T14:14:50.588Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T14:14:50.589Z","msg":"  the previous run failed with: command"}
+{"ts":"2026-11-25T14:14:50.590Z","msg":"  starting from the fix brief, with those failures in it"}
+{"ts":"2026-11-25T14:14:52.880Z","msg":"  implementer: t3q"}
+{"ts":"2026-11-25T14:14:52.882Z","msg":"  attempt 2: briefing implementer"}
+{"ts":"2026-11-25T14:17:54.454Z","msg":"  note: the worker did not end with a status trailer - judging the diff alone"}
+{"ts":"2026-11-25T14:17:54.457Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T14:17:55.694Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T14:17:59.010Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T14:18:01.727Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T14:18:07.670Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T14:18:14.782Z","msg":"    proof: the tests fail without the change (3 new failure(s))"}
+{"ts":"2026-11-25T14:18:15.193Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T14:18:15.194Z","msg":"  the worker said: no status trailer"}
+{"ts":"2026-11-25T14:18:17.848Z","msg":"  implementer: t3r"}
+{"ts":"2026-11-25T14:18:17.853Z","msg":"  attempt 3: briefing implementer"}
+{"ts":"2026-11-25T14:21:29.317Z","msg":"  note: the worker did not end with a status trailer - judging the diff alone"}
+{"ts":"2026-11-25T14:21:29.320Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T14:21:30.350Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T14:21:33.280Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T14:21:35.426Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T14:21:40.670Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T14:21:46.926Z","msg":"    proof: the tests fail without the change (3 new failure(s))"}
+{"ts":"2026-11-25T14:21:47.426Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T14:21:47.427Z","msg":"  the worker said: no status trailer"}
+{"ts":"2026-11-25T14:21:47.708Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T14:21:47.712Z","msg":"p0-7-policy-settings-that-still-have-no--01: blocked, left in place for inspection — command: `pnpm --filter @workspace/memory run test:all` exited 1 with NEW failures: [EVIDENCE AGE] memory with evidence older than maxEvidenceAgeDays is NOT retrievable | [EVIDENCE AGE] old evidence memory is retrievable for owner with no limits"}
+{"ts":"2026-11-25T14:21:47.718Z","msg":"  the Evidence Log already said this - nothing to write"}
+{"ts":"2026-11-25T14:21:47.719Z","msg":"\nsummary: 2 merged, 1 blocked"}
+{"ts":"2026-11-25T14:21:47.719Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}
+{"ts":"2026-11-25T14:30:54.411Z","msg":"\n=== batch 1: p0-7-policy-settings-that-still-have-no--01 ==="}
+{"ts":"2026-11-25T14:30:54.412Z","msg":"\n=== p0-7-policy-settings-that-still-have-no--01 (open) P0.7 Policy settings that still have no effect ==="}
+{"ts":"2026-11-25T14:30:54.458Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\p0-7-policy-settings-that-still-have-no--01"}
+{"ts":"2026-11-25T14:30:54.458Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory"}
+{"ts":"2026-11-25T14:30:54.458Z","msg":"  base:     582049d (the tip of main when this item started)"}
+{"ts":"2026-11-25T14:30:54.458Z","msg":"  focus:    packages/memory/package.json, packages/memory/src/storage/db.ts, packages/memory/src/domain/governance.types.ts, packages/memory/src/governance/policy.ts, packages/memory/src/retrieval/activate.ts, packages/memory/src/graph/evolve.ts, packages/memory/src/retrieval/search.ts:108,182, packages/memory/src/graph/planner.ts:51,85,98, packages/memory/scripts/<name>-test.ts, packages/memory/src/retrieval/search.ts, packages/memory/src/graph/planner.ts"}
+{"ts":"2026-11-25T14:30:54.870Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T14:30:54.872Z","msg":"  the previous run failed with: command"}
+{"ts":"2026-11-25T14:30:54.872Z","msg":"  starting from the fix brief, with those failures in it"}
+{"ts":"2026-11-25T14:30:57.262Z","msg":"  implementer: t3s"}
+{"ts":"2026-11-25T14:30:57.265Z","msg":"  attempt 2: briefing implementer"}
+{"ts":"2026-11-25T14:34:29.526Z","msg":"    the model API failed (1/4) - waiting and sending the prompt again"}
+{"ts":"2026-11-25T14:34:45.517Z","msg":"    the model API failed (2/4) - waiting and sending the prompt again"}
+{"ts":"2026-11-25T14:35:01.032Z","msg":"    the model API failed (3/4) - waiting and sending the prompt again"}
+{"ts":"2026-11-25T14:35:16.571Z","msg":"    the model API failed (4/4) - waiting and sending the prompt again"}
+{"ts":"2026-11-25T14:36:40.998Z","msg":"    the model API failed four times - giving up on this turn"}
+{"ts":"2026-11-25T14:36:41.004Z","msg":"  note: the worker did not end with a status trailer - judging the diff alone"}
+{"ts":"2026-11-25T14:36:41.005Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T14:36:42.007Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T14:36:44.794Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T14:36:47.226Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T14:36:52.654Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T14:37:00.121Z","msg":"    proof: the tests fail without the change (3 new failure(s))"}
+{"ts":"2026-11-25T14:37:00.472Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T14:37:00.473Z","msg":"  the worker said: no status trailer"}
+{"ts":"2026-11-25T14:37:02.989Z","msg":"  implementer: t3t"}
+{"ts":"2026-11-25T14:37:02.992Z","msg":"  attempt 3: briefing implementer"}
+{"ts":"2026-11-25T14:37:13.787Z","msg":"    the model API failed (1/4) - waiting and sending the prompt again"}
+{"ts":"2026-11-25T14:37:29.537Z","msg":"    the model API failed (2/4) - waiting and sending the prompt again"}
+{"ts":"2026-11-25T14:37:45.188Z","msg":"    the model API failed (3/4) - waiting and sending the prompt again"}
+{"ts":"2026-11-25T14:38:00.853Z","msg":"    the model API failed (4/4) - waiting and sending the prompt again"}
+{"ts":"2026-11-25T14:38:16.432Z","msg":"    the model API failed four times - giving up on this turn"}
+{"ts":"2026-11-25T14:38:16.433Z","msg":"  note: the worker did not end with a status trailer - judging the diff alone"}
+{"ts":"2026-11-25T14:38:16.433Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T14:38:17.388Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T14:38:20.083Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T14:38:22.264Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T14:38:27.543Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T14:38:34.193Z","msg":"    proof: the tests fail without the change (3 new failure(s))"}
+{"ts":"2026-11-25T14:38:34.526Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T14:38:34.527Z","msg":"  the worker said: no status trailer"}
+{"ts":"2026-11-25T14:38:34.754Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T14:38:34.755Z","msg":"p0-7-policy-settings-that-still-have-no--01: blocked, left in place for inspection — command: `pnpm --filter @workspace/memory run test:all` exited 1 with NEW failures: [EVIDENCE AGE] memory with evidence older than maxEvidenceAgeDays is NOT retrievable | [EVIDENCE AGE] old evidence memory is retrievable for owner with no limits"}
+{"ts":"2026-11-25T14:38:34.757Z","msg":"  the Evidence Log already said this - nothing to write"}
+{"ts":"2026-11-25T14:38:34.758Z","msg":"\nsummary: 2 merged, 1 blocked"}
+{"ts":"2026-11-25T14:38:34.758Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}
+{"ts":"2026-11-25T15:37:26.552Z","msg":"\n=== batch 1: p0-7-policy-settings-that-still-have-no--01 ==="}
+{"ts":"2026-11-25T15:37:26.559Z","msg":"\n=== p0-7-policy-settings-that-still-have-no--01 (open) P0.7 Policy settings that still have no effect ==="}
+{"ts":"2026-11-25T15:37:26.652Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\p0-7-policy-settings-that-still-have-no--01"}
+{"ts":"2026-11-25T15:37:26.652Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory"}
+{"ts":"2026-11-25T15:37:26.653Z","msg":"  base:     ae3f667 (the tip of main when this item started)"}
+{"ts":"2026-11-25T15:37:26.653Z","msg":"  focus:    packages/memory/package.json, packages/memory/src/storage/db.ts, packages/memory/src/domain/governance.types.ts, packages/memory/src/governance/policy.ts, packages/memory/src/retrieval/activate.ts, packages/memory/src/graph/evolve.ts, packages/memory/src/retrieval/search.ts:108,182, packages/memory/src/graph/planner.ts:51,85,98, packages/memory/scripts/<name>-test.ts, packages/memory/src/retrieval/search.ts, packages/memory/src/graph/planner.ts"}
+{"ts":"2026-11-25T15:37:27.281Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T15:37:27.283Z","msg":"  the previous run failed with: command"}
+{"ts":"2026-11-25T15:37:27.284Z","msg":"  starting from the fix brief, with those failures in it"}
+{"ts":"2026-11-25T15:37:30.222Z","msg":"  implementer: t3x"}
+{"ts":"2026-11-25T15:37:30.224Z","msg":"  attempt 2: briefing implementer"}
+{"ts":"2026-11-25T16:39:09.394Z","msg":"  note: the worker did not end with a status trailer - judging the diff alone"}
+{"ts":"2026-11-25T16:39:09.395Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T16:39:12.206Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T16:39:18.856Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T16:39:25.031Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T16:39:54.883Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}

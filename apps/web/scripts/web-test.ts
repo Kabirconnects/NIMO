@@ -6,6 +6,7 @@
 import { initials } from "../src/lib/initials.js";
 import { runSessionStateTests } from "../src/features/auth/utils/session-state.test.js";
 import { runClearSessionCacheTests } from "../src/features/auth/utils/clear-session-cache.test.js";
+import { runApiErrorTests } from "../src/lib/api-error.test.js";
 
 let passed = 0;
 let failed = 0;
@@ -31,6 +32,7 @@ assert("leading/trailing whitespace is trimmed", initials("  Jane  Doe  ") === "
 
 runSessionStateTests(assert);
 runClearSessionCacheTests(assert);
+runApiErrorTests(assert);
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

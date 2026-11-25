@@ -175,6 +175,7 @@ demo took five runs instead of one.
 | 11 | a turn "finished" instantly with no output | an agent looks idle for a moment before it starts | the report trailer is the completion signal; an idle agent only ends the turn once it has been working |
 | 12 | review failed even when the reviewer was right | all of the above | fixed together; the demo then passed review and merged |
 | 13 | **the worker never saw the failures it was handed** | the terminal scrolls, so the *previous* turn's `STATUS: done` trailer was still on screen when the next prompt was sent; the harness matched it, thought the new turn was over, and ran the gates while the worker was still working | only the screen after the echoed prompt is read, so a trailer from an earlier turn can never be mistaken for this turn's answer |
+| 14 | **the merge never happened** | the merge phase resolved the base **SHA captured at startup**, so `git rebase <base>` was a no-op; every item that merged during the run moved the base branch, so by merge time the branch and the item had diverged and the fast-forward merge failed | the base **branch** is resolved fresh at merge time, the merge refuses to run unless HEAD is on that branch, and a base that moves mid-merge is retried |
 
 Bug 13 is the one that mattered. Its symptom was subtle: the retries simply came
 back too fast (1m39s and 52s for attempts that needed minutes), and the identical
@@ -186,6 +187,24 @@ exactly as designed.
 It was found by reading the **timings** in the ledger rather than the output: two
 attempts under two minutes on a 447-line test file is not plausible, and that
 inconsistency was the only signal.
+
+Bug 14 was found the same way — by reading the reflog instead of the output:
+
+```
+ec6edfb HEAD@{0}: commit: plan(c-temporal-memory-03): ...
+f34a8d9 HEAD@{1}: reset: moving to f34a8d9
+ab4c0d7 HEAD@{2}: rebase (finish): returning to refs/heads/plan/c-temporal-memory-03
+```
+
+There is no rebase *after* the commit, so the merge-time rebase never happened in
+the worktree. The cause was one line: `ctx.base` held a SHA, and
+`git rev-parse <that sha>` returns that same sha — the comment said "rebase onto
+the current base", but the code resolved the base from *startup*. The first demo
+passed only because nothing had moved the base branch during that run.
+
+Both bugs share a shape worth naming: **the harness remembered what was true when
+it started, instead of asking what is true now.** A stale fact that looks correct
+is worse than no fact, because nothing looks wrong.
 
 The lesson generalises: **a harness that is never run is a hypothesis.** Five of these
 bugs were invisible to reading the code and obvious only when an agent actually used it.

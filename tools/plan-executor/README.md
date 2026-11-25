@@ -90,9 +90,15 @@ node tools/plan-executor/plan-executor.mjs \
 | `--gates "<cmd;cmd>"` | override the gate commands |
 | `--parent <t>` | herdr terminal to parent the workers to (default: auto) |
 | `--plan-id <id>` | name of the state directory (default: derived from the checklist) |
+| `--merge-only` | merge items that already passed every gate and the reviewer, without spawning a worker (recovery path) |
 
 By default every open item is worked on — both `[ ]` and `[~]`. Use `--open-only`
 to skip the partial ones.
+
+`--merge-only` is the recovery path: if a merge fails (a diverged base, a
+conflict) but the work itself had already passed every gate and the independent
+review, this merges it without running the worker again. The gates are still
+re-run after the rebase, so nothing is merged on trust.
 
 ## Item ids
 
@@ -134,6 +140,17 @@ These are not hypothetical - each one broke a real run before it was fixed.
   terminal, so it must be matched by regex over the visible lines. A stray
   "VERDICT:" in the agent's reasoning would be misread, so the trailer is only
   accepted in the last few lines of the screen.
+- **The terminal scrolls, so the last turn's trailer is still visible.** Reading
+  it as the current turn's answer makes the harness give up while the worker is
+  still working — the worker is then never given the time to act on the failure
+  list it was handed. Only the screen *after* the echoed prompt is read.
+- **The base branch moves while the run is in progress.** Every merged item
+  adds a commit. The merge phase therefore resolves the base branch's tip
+  fresh; resolving the SHA captured at startup would rebase onto a stale base
+  and the fast-forward merge would fail.
+- **A worktree holds a full `node_modules`** — tens of thousands of files. The
+  removal gets ten minutes, falls back to deleting the directory directly, and
+  says so if it still cannot be removed.
 
 ## Requirements
 

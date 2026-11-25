@@ -46,19 +46,52 @@
       "merge": null
     },
     "c-temporal-memory-03": {
-      "status": "blocked",
-      "failures": [
+      "status": "done",
+      "mergeable": true,
+      "itemId": "c-temporal-memory-03",
+      "worktree": "C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03",
+      "branch": "plan/c-temporal-memory-03",
+      "head": "ec6edfb2a16d59bef0f1d7e9df100ef6d0234201",
+      "changed": [
+        "packages/memory/package.json",
+        "packages/memory/scripts/temporal-test.ts",
+        "packages/memory/src/governance/policy.ts",
+        "packages/memory/src/graph/evolve.ts",
+        "packages/memory/src/service.ts",
+        "packages/memory/src/storage/db.ts",
+        "packages/memory/src/workers/dreamer.worker.ts"
+      ],
+      "commandResults": [
         {
-          "gate": "command",
-          "detail": "`pnpm --filter @workspace/memory run typecheck` exited 2 and no baseline covers it. Output tail:\nscripts/temporal-test.ts(95,42): error TS2345: Argument of type '{ ownerId: string; role: \"user\"; content: string; }' is not assignable to parameter of type 'IngestExperienceInput'.\n  Property 'type' is missing in type '{ ownerId: string; role: \"user\"; content: string; }' but required in type 'IngestExperienceInput'.\nC:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory:\n[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @workspace/memory@0.0.1 typecheck: `tsc --noEmit -p tsconfig.typecheck.json`\nExit status 2\n\n$ tsc --noEmit -p tsconfig.typecheck.json"
+          "cmd": "pnpm --filter @workspace/memory run typecheck",
+          "code": 0,
+          "tail": "$ tsc --noEmit -p tsconfig.typecheck.json",
+          "currentFailures": [],
+          "newFailures": [],
+          "preExisting": []
         },
         {
-          "gate": "command",
-          "detail": "`pnpm --filter @workspace/memory run test:all` exited 1 and no baseline covers it. Output tail:\n     ^\n\nSqliteError: NOT NULL constraint failed: experiences.type\n    at captureExperience (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\storage\\db.ts:445:6)\n    at capture (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\ingestion\\capture.ts:18:10)\n    at ingest (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\ingestion\\ingest.ts:31:22)\n    at Object.remember (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\service.ts:98:12)\n    at <anonymous> (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\scripts\\temporal-test.ts:95:33) {\n  code: 'SQLITE_CONSTRAINT_NOTNULL'\n}\n\nNode.js v24.19.0"
+          "cmd": "pnpm --filter @workspace/memory run lint",
+          "code": 0,
+          "tail": "$ eslint .",
+          "currentFailures": [],
+          "newFailures": [],
+          "preExisting": []
+        },
+        {
+          "cmd": "pnpm --filter @workspace/memory run test:all",
+          "code": 0,
+          "tail": "✅ q9 (multi-hop) recall=1.00 prec=0.50 mrr=0.50 latency=1ms | \"What happened to growth after knockout?\"\n✅ q10 (direct) recall=1.00 prec=0.50 mrr=1.00 latency=1ms | \"Genetic hypothesis about geneX\"\n✅ q11 (direct) recall=1.00 prec=0.33 mrr=1.00 latency=2ms | \"Motor calibration procedure\"\n✅ q12 (direct) recall=1.00 prec=0.50 mrr=1.00 latency=1ms | \"How to start API\"\n✅ q13 (negative) recall=1.00 prec=1.00 mrr=1.00 latency=1ms | \"Quantum chromodynamics\"\n✅ q14 (negative) recall=1.00 prec=1.00 mrr=1.00 latency=0ms | \"Unicode normalization forms\"\n✅ q15 (direct) recall=1.00 prec=1.00 mrr=1.00 latency=0ms | \"Goal of the project\"\n✅ q16 (semantic) recall=1.00 prec=0.50 mrr=1.00 latency=1ms | \"Which storage engine powers Nimo?\"\n✅ q17 (semantic) recall=1.00 prec=0.33 mrr=1.00 latency=1ms | \"What kind of answers does the user like?\"\n✅ q18 (semantic) recall=1.00 prec=1.00 mrr=1.00 latency=1ms | \"Tell me about the neuron firing concept\"\n\n$ tsx scripts/agi-test.ts && tsx scripts/dreamer-test.ts && tsx scripts/formula-deep-test.ts && tsx scripts/capture-dedup-test.ts && tsx scripts/evolve-test.ts && tsx scripts/hardening-test.ts && tsx scripts/concurrency-test.ts && tsx scripts/temporal-test.ts && tsx scripts/benchmark-runner.ts",
+          "currentFailures": [],
+          "newFailures": [],
+          "preExisting": []
         }
       ],
-      "worktree": "C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03",
-      "branch": "plan/c-temporal-memory-03"
+      "itemState": "complete",
+      "remaining": null,
+      "reviewer": "t1z",
+      "implementer": "t1y",
+      "merge": null
     }
   }
 }

@@ -171,3 +171,33 @@
 {"ts":"2026-11-25T05:18:12.668Z","msg":"  reusing the existing worktree from a previous run"}
 {"ts":"2026-11-25T05:18:15.005Z","msg":"  implementer: t1y"}
 {"ts":"2026-11-25T05:18:15.007Z","msg":"  attempt 1: briefing implementer"}
+{"ts":"2026-11-25T05:20:27.100Z","msg":"  note: the worker did not end with a status trailer - judging the diff alone"}
+{"ts":"2026-11-25T05:20:27.102Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T05:20:28.209Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T05:20:31.964Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T05:20:34.502Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T05:20:39.742Z","msg":"    proof: re-running the tests against the pre-change source"}
+{"ts":"2026-11-25T05:20:45.175Z","msg":"    proof: inconclusive - the suite could not run against the old source (no named test failure, probably a compile error)"}
+{"ts":"2026-11-25T05:20:45.272Z","msg":"  gates failed: command, command, proof"}
+{"ts":"2026-11-25T05:20:45.274Z","msg":"  attempt 2: briefing implementer"}
+{"ts":"2026-11-25T05:21:54.149Z","msg":"  note: the worker did not end with a status trailer - judging the diff alone"}
+{"ts":"2026-11-25T05:21:54.150Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T05:21:55.190Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T05:21:58.022Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T05:22:00.256Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T05:22:04.764Z","msg":"    proof: re-running the tests against the pre-change source"}
+{"ts":"2026-11-25T05:22:08.858Z","msg":"    proof: the tests fail without the change (11 new failure(s))"}
+{"ts":"2026-11-25T05:22:08.907Z","msg":"  gates passed"}
+{"ts":"2026-11-25T05:22:09.202Z","msg":"  spawning independent reviewer"}
+{"ts":"2026-11-25T05:22:25.269Z","msg":"  review PASSED"}
+{"ts":"2026-11-25T05:22:25.422Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T05:22:36.271Z","msg":"  merge failed: hint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.\n"}
+{"ts":"2026-11-25T05:22:36.273Z","msg":"\nsummary: 1 merged, 1 blocked"}
+{"ts":"2026-11-25T05:22:36.273Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}
+{"ts":"2026-11-25T05:30:54.678Z","msg":"\n=== merge-only mode: no workers are spawned ==="}
+{"ts":"2026-11-25T05:30:54.684Z","msg":"\n=== c-temporal-memory-03 (partial) C. Temporal Memory ==="}
+{"ts":"2026-11-25T05:30:54.684Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T05:30:54.778Z","msg":"  merging onto demo/plan-executor @ 1d33459"}
+{"ts":"2026-11-25T05:31:33.808Z","msg":"  merged and recorded: c-temporal-memory-03"}
+{"ts":"2026-11-25T05:31:33.809Z","msg":"\nsummary: 2 merged, 0 blocked"}
+{"ts":"2026-11-25T05:31:33.809Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}

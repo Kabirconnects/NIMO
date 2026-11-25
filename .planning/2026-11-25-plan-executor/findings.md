@@ -393,6 +393,46 @@ gates saw. That is deliberate — the reviewer is there to judge *judgement*
 questions the mechanical gates cannot decide, not to discover a different view
 of the same bytes.
 
+## 16. A failing test file is not the same as a covered requirement (P0.7)
+
+The proof gate answers one question: *does the new test fail against the pre-change
+source?* That is a single signal for the whole test file. P0.7 had **three**
+settings to make live, and the first version of the test file failed only **two**
+of its eight assertions on the old source — the two evolution assertions passed
+on the old code, so they proved nothing while still counting towards "the test
+fails".
+
+Both evolution assertions were true by construction:
+
+- `"Original belief"` vs `"Contradictory new evidence"` — the conflict classifier
+  calls that pair `unrelated`, so `evolve()` returned `{ changed: false }` on the
+  old code too. The policy was not what stopped the evolution.
+- `"the deploy window is open on friday"` vs `"... is not open on friday"` — a
+  negation flip, but the classifier's **duplicate** check (similarity >= 0.92)
+  runs *before* the polarity check, so the pair is `duplicate`, not
+  `contradiction`. Same result: the old code also returned `changed: false`.
+
+Only a numeric conflict on the same subject (`"the deploy timeout is 30 seconds"`
+vs `"... 60 seconds"`) is classified `contradiction`, and only then does the
+assertion distinguish the old code from the new one.
+
+Two lessons, both mechanical:
+
+1. **The proof gate should report *which* assertions fail**, not merely that the
+   file fails. The item names N settings; N assertions must fail on the
+   pre-change source. One failing assertion can hide N-1 assertions that were
+   already true before the change.
+2. **A check that cannot fail is worse than no check** — it reads as coverage in
+   the report and in the evidence line, and it makes the item look proven. The
+   same shape appeared in the implementation itself: the first age filter read
+   `Number(ev.observedAt)` on an ISO **string**, which is `NaN`, so the check
+   could never fire while looking completely correct. "The code reads right" and
+   "the mechanism can fire" are different questions; only the second one is
+   covered by a test that fails on the old source.
+
+The general rule: **a proof is per-requirement, not per-file.** A file that fails
+once proves that *something* changed, and nothing about the rest.
+
 ## 6. Windows specifics
 
 - `pnpm` on PATH resolves to a `.cmd` ⇒ shell execution needed for spawn.

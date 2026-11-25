@@ -464,3 +464,21 @@
 {"ts":"2026-11-25T16:39:18.856Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
 {"ts":"2026-11-25T16:39:25.031Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
 {"ts":"2026-11-25T16:39:54.883Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T16:49:54.472Z","msg":"\n=== batch 1: p0-7-policy-settings-that-still-have-no--01 ==="}
+{"ts":"2026-11-25T16:49:54.474Z","msg":"\n=== p0-7-policy-settings-that-still-have-no--01 (open) P0.7 Policy settings that still have no effect ==="}
+{"ts":"2026-11-25T16:49:54.512Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\p0-7-policy-settings-that-still-have-no--01"}
+{"ts":"2026-11-25T16:49:54.512Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory"}
+{"ts":"2026-11-25T16:49:54.512Z","msg":"  base:     ae3f667 (the tip of main when this item started)"}
+{"ts":"2026-11-25T16:49:54.512Z","msg":"  focus:    packages/memory/package.json, packages/memory/src/storage/db.ts, packages/memory/src/domain/governance.types.ts, packages/memory/src/governance/policy.ts, packages/memory/src/retrieval/activate.ts, packages/memory/src/graph/evolve.ts, packages/memory/src/retrieval/search.ts:108,182, packages/memory/src/graph/planner.ts:51,85,98, packages/memory/scripts/<name>-test.ts, packages/memory/src/retrieval/search.ts, packages/memory/src/graph/planner.ts"}
+{"ts":"2026-11-25T16:49:54.798Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T16:49:54.800Z","msg":"  the previous run failed with: command"}
+{"ts":"2026-11-25T16:49:54.800Z","msg":"  starting from the fix brief, with those failures in it"}
+{"ts":"2026-11-25T16:49:57.204Z","msg":"  implementer: t3z"}
+{"ts":"2026-11-25T16:49:57.206Z","msg":"  attempt 2: briefing implementer"}
+{"ts":"2026-11-25T16:57:19.769Z","msg":"    the model provider is rate-limited for 7h 2m 44s - no worker can run until it resets"}
+{"ts":"2026-11-25T16:57:19.864Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T16:57:19.865Z","msg":"p0-7-policy-settings-that-still-have-no--01: blocked, left in place for inspection — provider: the model provider is rate-limited for 7h 2m 44s - no worker can run until it resets"}
+{"ts":"2026-11-25T16:57:19.865Z","msg":"\n=== stopping: the model provider is not serving workers ===\n  nothing was attempted for the remaining items - they are untouched"}
+{"ts":"2026-11-25T16:57:19.978Z","msg":"  recorded 1 blocked item(s) in the Evidence Log"}
+{"ts":"2026-11-25T16:57:19.978Z","msg":"\nsummary: 2 merged, 0 blocked, 1 never attempted (the provider was not serving)"}
+{"ts":"2026-11-25T16:57:19.979Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}

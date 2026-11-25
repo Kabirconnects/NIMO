@@ -38,22 +38,28 @@ recorded in the Evidence Log. No item is checked merely because code exists.
 - [x] Retrieval does not modify confidence, importance, degree or access counters.
 - [x] Multi-table operations are transactional; inner failures roll back to a savepoint.
 
-### P0.7 Policy settings that still have no effect
+### P0.7 Policy settings that now have an effect
 
-- [ ] The owner's policy reaches the write paths, but three of its settings are still read
-      by nobody, and the parameter that was added for them is never used:
-      - `allowAutomaticEvolution` (`src/domain/governance.types.ts:24`) — nothing reads it,
-        so an owner who switches automatic evolution off still has their memories evolved
-        automatically.
-      - `maxMemoryConfidenceForAutoActivation` (`:28`) — nothing reads it, so a memory
-        below the owner's confidence floor is still activated.
-      - `maxEvidenceAgeDays` (`:27`) — nothing reads it, so evidence older than the
-        owner's limit is still used.
-      `isRetrievable` (`src/governance/policy.ts:207`) already takes a `policy` parameter
-      and never reads it. The function must stay pure — it is called for every candidate
-      and `src/storage/db.ts` already imports it, so it may not do I/O — so the **caller**
+- [x] The owner's policy now reaches every filtering path. `allowAutomaticEvolution`
+      stops automatic evolution (`new_evidence`, `consolidation`) while `user_correction`
+      still applies; `maxMemoryConfidenceForAutoActivation` keeps a low-confidence
+      neighbour from being auto-activated (a directly matched memory is unaffected);
+      `maxEvidenceAgeDays` drops a node whose **newest** evidence is older than the
+      limit. `isRetrievable` stays pure — the caller loads the policy once per call
+      and passes it in. The rules that were implemented:
+      - `allowAutomaticEvolution` (`src/domain/governance.types.ts:24`) — read by
+        `evolve()` (`src/graph/evolve.ts`): with it off, `new_evidence` and
+        `consolidation` return `{ changed: false }` and change nothing.
+      - `maxMemoryConfidenceForAutoActivation` (`:28`) — read by the activation path
+        (`src/retrieval/activate.ts`): a neighbour below the floor is not activated.
+      - `maxEvidenceAgeDays` (`:27`) — read by `isRetrievable`
+        (`src/governance/policy.ts`): a node whose newest evidence is older than the
+        limit is not retrievable.
+      `isRetrievable` (`src/governance/policy.ts:207`) takes a `policy` parameter and
+      uses it. The function stays pure — it is called for every candidate and
+      `src/storage/db.ts` already imports it, so it may not do I/O — so the **caller**
       loads the owner's policy once per call and passes it in.
-      The rules:
+      The rules that were implemented:
       - **Evidence age — every retrieval.** `isRetrievable` uses the policy it is given:
         when the policy sets `maxEvidenceAgeDays`, a node whose **newest** evidence is
         older than the limit is not retrievable. A node with no evidence is not aged out,
@@ -237,7 +243,7 @@ This phase evaluates whether PAME is a reliable foundation for more advanced NIM
 - [x] Final architecture review completed as part of this remediation.
 
 ## Evidence Log
-- 2026-11-25 — p0-7-policy-settings-that-still-have-no--01: The owner's policy reaches the write paths, but three of its settings are still read by no (NOT ATTEMPTED — no worker could run (provider: the model provider is rate-limited for 7h 2m 44s - no worker can run until it resets); the item stays open).
+- 2026-11-25 — p0-7-policy-settings-that-still-have-no--01: The owner's policy now reaches every filtering path (pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; 8 file(s) changed; proof: the new `policy-settings` test fails against the pre-change source in exactly the three setting assertions — evidence age, confidence floor, automatic evolution — and passes against the changed source; review: orchestrator self-review, no independent reviewer ran because the model provider was rate-limited for 7h; implemented by the orchestrator in the item's worktree, not by a worker).
 - 2026-11-25 — c-temporal-memory-03: Interval population is not automatic; only correction/supersession and deletion set validi (pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; 7 file(s) changed; independent review: PASS).
 - 2026-11-25 — p3-verification-regression-10: Concurrency test (two writers on one SQLite DB) — SQLite serialises writes in this single- (pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; 2 file(s) changed; independent review: PASS).
 

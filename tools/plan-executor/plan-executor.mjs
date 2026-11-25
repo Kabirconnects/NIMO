@@ -318,6 +318,49 @@ function collectFailures(output) {
 }
 
 /**
+ * The test commands that actually exercise the packages an item changed.
+ *
+ * The proof has to run the tests of the package that was changed. Running the
+ * first test command in the gate list proves nothing when the item lives in a
+ * different package: S4 (packages/agents) was "proved" by the server's suite,
+ * which never imports the agents package - so the old code passed and the
+ * proof gate failed for the wrong reason, pointing the worker at the wrong
+ * command.
+ */
+function proofCommandsFor(sourceChanged, gates, root) {
+  const testCmds = gates.filter((g) => /\btest\b/i.test(g));
+  const names = new Set();
+  for (const file of sourceChanged) {
+    let dir = path.dirname(file);
+    while (dir && dir !== "." && dir !== path.sep) {
+      const pkg = path.join(root, dir, "package.json");
+      if (fs.existsSync(pkg)) {
+        try {
+          const name = JSON.parse(fs.readFileSync(pkg, "utf8")).name;
+          if (name) names.add(name);
+        } catch {
+          /* an unreadable package.json gives us no name to match */
+        }
+        break;
+      }
+      dir = path.dirname(dir);
+    }
+  }
+
+  const cmds = [];
+  const uncovered = [];
+  for (const name of names) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const matches = testCmds.filter((c) =>
+      new RegExp(`--filter[ =]${escaped}(?:\\s|$)`).test(c),
+    );
+    if (matches.length) cmds.push(...matches);
+    else uncovered.push(name);
+  }
+  return { cmds: [...new Set(cmds)], uncovered, testCmds };
+}
+
+/**
  * Proof gate: the new tests must fail against the pre-change source.
  *
  * A test that passes before and after the change proves nothing. This is the
@@ -330,11 +373,22 @@ function collectFailures(output) {
  * "before" behaviour for them to contradict.
  */
 async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, baseline, onLog }) {
-  const testCmds = gates.filter((g) => /\btest\b/i.test(g));
+  const { cmds, uncovered, testCmds } = proofCommandsFor(sourceChanged, gates, worktree);
   if (!sourceChanged.length || !testCmds.length) return null;
+  if (!cmds.length) {
+    return {
+      gate: "proof",
+      detail:
+        `no gate command runs the tests of the package this item changed ` +
+        `(${uncovered.join(", ") || sourceChanged.join(", ")}), so the change cannot be proved. ` +
+        `Add that package's test command to the gates.`,
+    };
+  }
 
-  const cmd = testCmds[0];
-  onLog?.(`    proof: re-running the tests against the pre-change source`);
+  onLog?.(
+    `    proof: re-running the tests against the pre-change source ` +
+    `(${cmds.join(", ")})`,
+  );
 
   // Back up the worker's source files, so they can be restored exactly.
   const backup = fs.mkdtempSync(path.join(os.tmpdir(), "plan-executor-proof-"));
@@ -348,50 +402,62 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
 
   try {
     await git(["checkout", base, "--", ...sourceChanged], worktree);
-    const r = await execCmd(cmd, { cwd: worktree, timeout: 1_200_000 });
-    const output = `${r.stdout}\n${r.stderr}`;
-    const currentFailures = collectFailures(output);
-    const known = baseline?.commands?.[cmd] ?? [];
-    const newFailures = currentFailures.filter((f) => !known.includes(f));
+    const stillGreen = [];
+    for (const cmd of cmds) {
+      const r = await execCmd(cmd, { cwd: worktree, timeout: 1_200_000 });
+      const output = `${r.stdout}\n${r.stderr}`;
+      const currentFailures = collectFailures(output);
+      const known = baseline?.commands?.[cmd] ?? [];
+      const newFailures = currentFailures.filter((f) => !known.includes(f));
 
-    if (r.code === 0) {
-      return {
-        gate: "proof",
-        detail:
-          `the tests still pass against the pre-change source, so they do not prove ` +
-          `this change: \`${cmd}\` exited 0 with the old ${sourceChanged.join(", ")} in place. ` +
-          `Write a test that fails without the change.`,
-      };
-    }
-    if (!currentFailures.length) {
-      // The command died without naming a failing test - usually a compile error
-      // because the new test imports something the old source does not have.
-      // That is a weak proof: the test did not detect the change, it could not
-      // even load. Say so instead of calling it a pass.
+      if (r.code === 0) {
+        stillGreen.push({ cmd, output });
+        continue;
+      }
+      if (!currentFailures.length) {
+        // The command died without naming a failing test - usually a compile error
+        // because the new test imports something the old source does not have.
+        // That is a weak proof: the test did not detect the change, it could not
+        // even load. Say so instead of calling it a pass.
+        onLog?.(
+          `    proof: inconclusive - the suite could not run against the old source ` +
+          `(no named test failure, probably a compile error)`,
+        );
+        return {
+          gate: "proof",
+          detail:
+            `the proof of this change is inconclusive: with the pre-change source in ` +
+            `place, \`${cmd}\` failed without reporting a named test failure (it could ` +
+            `not compile or load against the old source), so the tests do not ` +
+            `demonstrate the behaviour they are supposed to. Write the test so it ` +
+            `runs against both versions and fails on the old one.`,
+        };
+      }
+      if (known.length && !newFailures.length) {
+        return {
+          gate: "proof",
+          detail:
+            `the tests do not prove this change: with the pre-change source in place, ` +
+            `\`${cmd}\` failed only for reasons that already failed at baseline.`,
+        };
+      }
       onLog?.(
-        `    proof: inconclusive - the suite could not run against the old source ` +
-        `(no named test failure, probably a compile error)`,
+        `    proof: the tests fail without the change (${newFailures.length} new failure(s))`,
       );
-      return {
-        gate: "proof",
-        detail:
-          `the proof of this change is inconclusive: with the pre-change source in ` +
-          `place, \`${cmd}\` failed without reporting a named test failure (it could ` +
-          `not compile or load against the old source), so the tests do not ` +
-          `demonstrate the behaviour they are supposed to. Write the test so it ` +
-          `runs against both versions and fails on the old one.`,
-      };
+      return null;
     }
-    if (known.length && !newFailures.length) {
-      return {
-        gate: "proof",
-        detail:
-          `the tests do not prove this change: with the pre-change source in place, ` +
-          `\`${cmd}\` failed only for reasons that already failed at baseline.`,
-      };
-    }
-    onLog?.(`    proof: the tests fail without the change (${newFailures.length} new failure(s))`);
-    return null;
+
+    // Every command still passed against the old source: the tests do not
+    // detect the change. Show the worker what actually ran, so it can see
+    // which assertion passed on the old code.
+    const detail =
+      `the tests still pass against the pre-change source, so they do not prove ` +
+      `this change: ` +
+      stillGreen.map((p) => `\`${p.cmd}\` exited 0 with the old ${sourceChanged.join(", ")} in place.`).join(" ") +
+      ` The assertion that should have failed passed on the old code - the test ` +
+      `does not exercise the behaviour this item changed. Output tail:\n` +
+      stillGreen.map((p) => p.output.trim().split(/\r?\n/).slice(-12).join("\n")).join("\n");
+    return { gate: "proof", detail };
   } finally {
     // Put the worker's source back, byte for byte.
     for (const f of files) fs.copyFileSync(f.dest, f.abs);
@@ -838,17 +904,42 @@ async function readScreen(address) {
   return r.stdout;
 }
 
+/**
+ * A modal that is waiting for a keypress, and the key that dismisses it.
+ *
+ * Claude Code interrupts the turn to ask for a decision. The one that bit us
+ * is the plan approval: the worker wrote a plan, asked "Would you like to
+ * proceed?", and sat there until the attempt timed out. The worktree stayed
+ * empty, so the item failed the diff gate three times with no explanation -
+ * the harness never even mentioned the modal.
+ */
+function detectModal(screen) {
+  // Only the bottom of the screen counts: the agent may quote the phrase in
+  // its own output, but a real modal is painted right above the prompt.
+  const tail = screen.split(/\r?\n/).slice(-30).join("\n");
+  if (/written up a plan and is ready to execute|Would you like to proceed\?/i.test(tail)) {
+    // Option 1 is "Yes, and use auto mode" and is selected by default, so a
+    // plain enter approves the plan and lets the worker execute it.
+    return { kind: "plan-approval", keys: ["enter"] };
+  }
+  if (/Enter to continue/i.test(tail)) return { kind: "enter-continue", keys: ["enter"] };
+  if (/waiting for your input|press enter/i.test(tail)) return { kind: "waiting-input", keys: ["enter"] };
+  return null;
+}
+
+async function dismissModal(address, modal) {
+  for (const key of modal.keys) {
+    await hc(["keys", address, key]);
+    await sleep(300);
+  }
+  return `dismissed a ${modal.kind} modal`;
+}
+
 async function unstick(address) {
   const screen = await readScreen(address);
-  if (/Enter to continue/i.test(screen)) {
-    await hc(["keys", address, "enter"]);
-    return "dismissed a modal";
-  }
-  if (/waiting for your input|press enter/i.test(screen)) {
-    await hc(["keys", address, "enter"]);
-    return "pressed enter";
-  }
-  return null;
+  const modal = detectModal(screen);
+  if (!modal) return null;
+  return dismissModal(address, modal);
 }
 
 /** Is the report trailer visible near the end of the screen? */
@@ -899,6 +990,17 @@ async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) 
     const screen = await readScreen(address);
     const current = screenSincePrompt(screen, marker);
     if (done && hasTrailer(current, done)) return current;
+
+    // A modal does not always show up as a "blocked" state: the plan-approval
+    // prompt leaves the agent idle and waiting, so the worker would sit there
+    // until the attempt timed out. Look for a modal on every poll.
+    const modal = detectModal(current);
+    if (modal && unsticks < 5) {
+      unsticks++;
+      await dismissModal(address, modal);
+      await sleep(1500);
+      continue;
+    }
 
     if (state === "blocked" && unsticks < 2) {
       unsticks++;

@@ -20,6 +20,13 @@ other worktrees. Stay strictly inside your worktree.
 2. **No leftovers**: no `TODO`, `FIXME`, `XXX`, `HACK`, `not implemented`, `unimplemented`,
    `@ts-ignore`, `@ts-expect-error`, or `stub` on added lines. No placeholder bodies.
 3. Keep or add the automated test that proves the behavior. A fix without a test is incomplete.
+   **A proving test fails on the old code.** The gates roll the source back to the
+   pre-change version and run your tests again: if they still pass, the test does not
+   demonstrate anything and the item is rejected. So the test must feed the code the
+   exact input the old version gets wrong, and assert the new behaviour. A test whose
+   inputs never reach the changed code proves nothing — for example, asserting that two
+   *different* inputs are treated differently is no proof if the old code already did
+   that; the inputs must collide in the old code and not in the new one.
 4. Re-run the gate commands and paste the real output. Never claim a pass you did not see.
    If a command cannot run at all (the Bash classifier may be unavailable), say so and
    stop retrying — the orchestrator runs the gates itself.

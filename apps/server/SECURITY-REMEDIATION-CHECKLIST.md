@@ -29,7 +29,7 @@ touch, and S0 is what creates one.
 
 ## S0 — Prerequisite: the packages under this plan have no test runner
 
-- [ ] `apps/server`, `apps/web` and `packages/agents` currently have **no automated
+- [x] `apps/server`, `apps/web` and `packages/agents` currently have **no automated
       tests at all** — each `test` script is `echo 'no tests' && exit 0`, so a gate
       that runs `pnpm run test` passes without checking anything. `packages/memory`
       has the repo's one working convention: plain `tsx scripts/<name>-test.ts`
@@ -107,6 +107,7 @@ touch, and S0 is what creates one.
 ---
 
 ## Evidence Log
+- 2026-11-25 — s0-prerequisite-the-packages-under-this--01: `apps/server`, `apps/web` and `packages/agents` currently have **no automated tests at all (pnpm --filter @workspace/server run typecheck => exit 0; pnpm --filter @workspace/server run lint => exit 0; pnpm --filter @workspace/server run test => exit 0; pnpm --filter web run typecheck => exit 0; pnpm --filter web run lint => exit 0; pnpm --filter web run test => exit 0; pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; pnpm --filter @workspace/agents run typecheck => exit 0; pnpm --filter @workspace/agents run lint => exit 0; pnpm --filter @workspace/agents run test => exit 0; 9 file(s) changed; independent review: PASS).
 
 _Evidence is written here by the plan executor, not by workers. Each entry records the
 gate commands that were actually run, the number of files changed, and the independent

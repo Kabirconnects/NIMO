@@ -96,8 +96,19 @@ export function evolve(input: EvolutionInput): EvolutionOutput {
     assessment.kind === "contradiction" || assessment.kind === "correction";
 
   // Explicit human correction: the only path that may override the old belief.
+  // Correction sets validity: the corrected belief's validity interval ends (validUntil),
+  // and the new correcting evidence's validity interval begins (validFrom).
   if (cause === "user_correction") {
-    const updated = updateMemory(memoryId, ownerId, { confidence: 0.1 });
+    const correctionTime = new Date();
+    const updated = updateMemory(memoryId, ownerId, {
+      confidence: 0.1,
+      validUntil: target.validUntil ?? correctionTime,
+    });
+    if (newEvidence && !newEvidence.validFrom) {
+      updateMemory(newEvidence.id, ownerId, {
+        validFrom: correctionTime,
+      });
+    }
     insertRevision({
       memoryId,
       ownerId,

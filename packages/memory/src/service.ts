@@ -163,7 +163,11 @@ export const memoryService: MemoryService = {
     if (changes.content !== undefined) assertNotDenial(changes.content);
 
     return withTransaction(() => {
-      const after = updateMemoryRow(memoryId, ownerId, changes);
+      const effectiveChanges = { ...changes };
+      if (effectiveChanges.status === "superseded" && effectiveChanges.validUntil === undefined) {
+        effectiveChanges.validUntil = new Date();
+      }
+      const after = updateMemoryRow(memoryId, ownerId, effectiveChanges);
       if (!after) throw new MemoryPolicyError(`Memory ${memoryId} not found for owner ${ownerId}`);
 
       // Preserve the version history — never silently rewrite. If the older
@@ -173,7 +177,7 @@ export const memoryService: MemoryService = {
         ownerId,
         previousContent: detectSecret(before.content) ? redactSecrets(before.content) : before.content,
         newContent: after.content,
-        reason: "consolidation",
+        reason: effectiveChanges.status === "superseded" ? "supersession" : "consolidation",
         evidenceIds: (after.evidence ?? []).map((e) => e.experienceId),
       });
 
@@ -230,10 +234,18 @@ export const memoryService: MemoryService = {
       });
       // Supersession is a status change, not just an edge: flip the OLD
       // memory to "superseded" so isRetrievable() hides it from recall.
+      // Supersession sets validity: old memory's validity interval ends (validUntil),
+      // and new memory's validity interval begins (validFrom).
       if (relation === "supersedes" && to.status === "active") {
+        const supersessionTime = new Date();
         updateMemoryRow(toMemoryId, ownerId, {
           status: "superseded",
           supersededBy: fromMemoryId,
+          validUntil: supersessionTime,
+        });
+        updateMemoryRow(fromMemoryId, ownerId, {
+          validFrom: from.validFrom ?? supersessionTime,
+          supersedes: Array.from(new Set([...(from.supersedes ?? []), toMemoryId])),
         });
         insertRevision({
           memoryId: toMemoryId,

@@ -99,10 +99,17 @@ function mergeNearDuplicates(ownerId: string): number {
             evidenceIds: b.evidence.map((e) => e.experienceId),
           });
         }
-        // Mark b as superseded by a (preserve history, don't delete)
+        // Mark b as superseded by a (preserve history, don't delete).
+        // Supersession sets validity for both nodes.
+        const supersessionTime = new Date();
         updateMemory(b.id, ownerId, {
           status: "superseded",
           supersededBy: a.id,
+          validUntil: b.validUntil ?? supersessionTime,
+        });
+        updateMemory(a.id, ownerId, {
+          validFrom: a.validFrom ?? supersessionTime,
+          supersedes: Array.from(new Set([...(a.supersedes ?? []), b.id])),
         });
         mergedIds.add(b.id);
         merged++;

@@ -202,6 +202,7 @@ export function evaluateWrite(
 export function isRetrievable(node: MemoryNode, ownerId: string): boolean {
   if (node.ownerId !== ownerId) return false;
   if (node.status !== "active") return false;
-  if (node.validUntil && node.validUntil.getTime() < Date.now()) return false;
+  if (node.validFrom && node.validFrom.getTime() > Date.now()) return false;
+  if (node.validUntil && node.validUntil.getTime() <= Date.now()) return false;
   return true;
 }

@@ -675,7 +675,9 @@ export function updateMemory(id: string, ownerId: string, changes: Partial<Memor
   if (changes.entities !== undefined) push("entities", JSON.stringify(changes.entities));
   if (changes.evidence !== undefined) push("evidence", JSON.stringify(changes.evidence));
   if (changes.supersededBy !== undefined) push("superseded_by", changes.supersededBy);
+  if (changes.supersedes !== undefined) push("supersedes", JSON.stringify(changes.supersedes));
   if (changes.lastAccessedAt !== undefined) push("last_accessed_at", changes.lastAccessedAt?.getTime());
+  if (changes.validFrom !== undefined) push("valid_from", changes.validFrom?.getTime());
   if (changes.validUntil !== undefined) push("valid_until", changes.validUntil?.getTime());
   if (changes.embedding !== undefined) push("embedding", changes.embedding ? JSON.stringify(changes.embedding) : null);
 

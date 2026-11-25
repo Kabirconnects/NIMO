@@ -151,6 +151,14 @@ These are not hypothetical - each one broke a real run before it was fixed.
 - **A worktree holds a full `node_modules`** — tens of thousands of files. The
   removal gets ten minutes, falls back to deleting the directory directly, and
   says so if it still cannot be removed.
+- **The brief is the instruction, so the brief must be right.** Two bugs made it
+  wrong: item-named paths were joined onto the checklist's package root (so the
+  worker was told to edit `…\apps\server\apps\server`, which does not exist),
+  and a multi-line checklist item was cut at its first line (so the worker *and*
+  the reviewer both received "…currently have **no automated"). The reviewer only
+  adds independence over the work, never over the instruction — if both halves
+  read a broken instruction, they share the blind spot instead of checking each
+  other.
 
 ## Requirements
 

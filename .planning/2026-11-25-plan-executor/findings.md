@@ -176,6 +176,23 @@ demo took five runs instead of one.
 | 12 | review failed even when the reviewer was right | all of the above | fixed together; the demo then passed review and merged |
 | 13 | **the worker never saw the failures it was handed** | the terminal scrolls, so the *previous* turn's `STATUS: done` trailer was still on screen when the next prompt was sent; the harness matched it, thought the new turn was over, and ran the gates while the worker was still working | only the screen after the echoed prompt is read, so a trailer from an earlier turn can never be mistaken for this turn's answer |
 | 14 | **the merge never happened** | the merge phase resolved the base **SHA captured at startup**, so `git rebase <base>` was a no-op; every item that merged during the run moved the base branch, so by merge time the branch and the item had diverged and the fast-forward merge failed | the base **branch** is resolved fresh at merge time, the merge refuses to run unless HEAD is on that branch, and a base that moves mid-merge is retried |
+| 15 | **the worker was told to edit directories that do not exist** | paths named in the item text (`apps/server`) were joined onto the checklist's *package* root, so the brief said `Change files only inside: ...\nimo\apps\server\apps\server` | item-named paths are resolved against the repo (package-relative ones get the package prefix) and kept only if they exist; the brief's scope list is now the scope the gate enforces |
+| 16 | **the worker and the reviewer both got half an item** | the parser read only the first line of a checklist item; a multi-line item reached the worker as a sentence cut in half ("...currently have **no automated") — and the reviewer judged the same fragment, so a half-understood task could pass | continuation lines are joined into the item text; the first line is kept separately for finding the item in the file |
+
+Bugs 15 and 16 are the same class, and the most dangerous one: **the brief lied.**
+Nothing in the output said the instruction was wrong. The worker was told to
+change files inside four nonexistent directories, and told the item was
+"`apps/server`, `apps/web` and `packages/agents` currently have **no automated".
+It would have failed — or worse, "succeeded" at something else.
+
+Bug 16 is the one that could have silently corrupted a result. The reviewer is
+meant to be the independent check on the worker, but it reads the *same*
+`ITEM_TEXT`. If the item text is truncated, worker and reviewer are judging the
+same fragment, and the review gate agrees with itself rather than with the
+plan. A pipeline whose two halves share a blind spot is one half.
+
+Both were found the same way: by reading the brief the worker actually received,
+rather than the brief the code was supposed to produce.
 
 Bug 13 is the one that mattered. Its symptom was subtle: the retries simply came
 back too fast (1m39s and 52s for attempts that needed minutes), and the identical
@@ -210,7 +227,6 @@ The lesson generalises: **a harness that is never run is a hypothesis.** Five of
 bugs were invisible to reading the code and obvious only when an agent actually used it.
 
 ## 11. The reviewer is not a proof — and the demo proved it
-
 The merged concurrency test called `repairGraphDegrees()` *before* asserting that
 `graph_degree` matched the edge table. The assertion was therefore true by
 construction: it could not detect a broken concurrent write. The independent reviewer
@@ -324,6 +340,27 @@ This is why the security checklist starts with **S0**: give those three packages
 repo's existing convention (plain `tsx scripts/<name>-test.ts`, no new dependency),
 and extend their `tsconfig` so the typecheck covers the test files too. S0 must
 land before the items it unblocks.
+
+## 15. The two halves must not share a blind spot
+
+The worker and the independent reviewer are meant to check each other. They read
+the same `ITEM_TEXT`, so any defect in how that text is produced is a blind spot
+both of them share — and the review gate then agrees with itself instead of with
+the plan.
+
+That is what bug 16 was: the item text was cut at the first line, so both halves
+were judging "…currently have **no automated".
+
+The general rule this suggests: **the reviewer only adds independence over the
+*work*, never over the *instruction*.** If the instruction is wrong, two agents
+reading it wrong are not two checks — they are one check, performed twice, with
+the same blind spot. The independent review is worth what its input is worth.
+
+The same applies to the diff the reviewer is given: the harness writes the diff
+out to a file and hands over the path, so the reviewer sees exactly what the
+gates saw. That is deliberate — the reviewer is there to judge *judgement*
+questions the mechanical gates cannot decide, not to discover a different view
+of the same bytes.
 
 ## 6. Windows specifics
 

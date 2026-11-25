@@ -1963,7 +1963,10 @@ async function main() {
         continue;
       }
       log(`\n=== ${item.id} (${item.state}) ${item.section} ===`);
-      results.push({ item, ...s });
+      // The item's recorded status is "blocked" when its MERGE failed - which
+      // is exactly the case merge-only exists to recover. The work itself is
+      // good (`mergeable`), so it goes to the merge phase as ready.
+      results.push({ item, ...s, status: "ready" });
     }
   } else {
     const concurrency = Math.max(1, args.workers);

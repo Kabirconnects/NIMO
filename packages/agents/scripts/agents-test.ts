@@ -13,6 +13,9 @@ import {
   getModel,
   getModelOptions,
 } from "../src/models/registry.js";
+import { startBackgroundProcess, stopBackgroundProcess, listBackgroundProcesses } from "../src/tools/shared/process.js";
+import path from "node:path";
+import fs from "node:fs";
 
 let passed = 0;
 let failed = 0;
@@ -107,6 +110,71 @@ console.log("getModelOptions");
     "PROVIDER_ORDER covers every returned provider",
     options.every((o) => (PROVIDER_ORDER as string[]).includes(o.provider)),
   );
+}
+
+// ---------------------------------------------------------------------------
+// process command collision test (`["run","a b"]` vs `["run","a","b"]`)
+// ---------------------------------------------------------------------------
+console.log("process argv command reuse collision check");
+
+{
+  const cwd = process.cwd();
+  // We can use node with a simple script or just test startBackgroundProcess with allowlisted command 'node'
+  // Let's test two different argv arrays that serialize to the same commandLine "node -e 'setTimeout(() => {}, 10000)'"
+  // vs separate arguments or similar.
+  // Wait, let's use a quick node one-liner process: node -e "setInterval(() => {}, 1000)"
+  // argv1: ["node", "-e", "setInterval(() => {}, 1000)"]
+  // argv2: ["node", "-e", "setInterval(() => {}, 1000)"] (same)
+  // Let's test distinct argv that might share commandLine if joined by space:
+  // e.g. argvA = ["node", "script.js arg1"] -> commandLine is "node script.js arg1"
+  // argvB = ["node", "script.js", "arg1"] -> commandLine is also "node script.js arg1"
+  const argvA = ["node", "-e", "console.log('A'); setTimeout(() => {}, 5000)"];
+  const argvB = ["node", "-e", "console.log('B'); setTimeout(() => {}, 5000)", "extra"]; // or different
+
+  // Even better: let's verify that startBackgroundProcess with `argv: ["node", "a b"]` and `argv: ["node", "a", "b"]` do NOT reuse each other despite having identical commandLine.
+  // Let's create dummy script files or use -e.
+  // With -e:
+  // argv1 = ["node", "-e", "setInterval(() => {}, 5000)"] -> commandLine = "node -e setInterval(() => {}, 5000)"
+  // Wait, if argv1 has spaces: ["node", "-e", "foo bar"] vs ["node", "-e", "foo", "bar"] -> wait, node -e expects 1 arg after -e. But node rejects or runs them.
+  // Let's test with any allowlisted command, e.g. `node`:
+  const res1 = startBackgroundProcess({
+    argv: ["node", "-e", "console.log(1); setTimeout(() => {}, 5000)"],
+    cwd,
+  });
+  assert("first process started successfully", res1.info.status === "running" && !res1.reused);
+
+  // Now try starting with the same argv -> should be reused
+  const res2 = startBackgroundProcess({
+    argv: ["node", "-e", "console.log(1); setTimeout(() => {}, 5000)"],
+    cwd,
+  });
+  assert("identical argv is reused", res2.reused);
+  assert("reused id matches first process", res2.info.id === res1.info.id);
+
+  // Test exact collision scenario specified in requirement:
+  // `["run", "a b"]` vs `["run", "a", "b"]` (using node or any allowlisted bin, e.g. node)
+  // argvA: ["node", "-e", "console.log(1); setTimeout(() => {}, 5000)"] (where element contains space)
+  // argvB: ["node", "-e", "console.log(1);", "setTimeout(() => {}, 5000)"] (where space is split into separate argv elements)
+  // Wait, let's test:
+  // runA = ["node", "run", "a b"] -> joined by space: "node run a b"
+  // runB = ["node", "run", "a", "b"] -> joined by space: "node run a b"
+  const resA = startBackgroundProcess({
+    argv: ["node", "-e", "console.log('A'); setTimeout(() => {}, 5000)"],
+    cwd,
+  });
+  const resB = startBackgroundProcess({
+    argv: ["node", "-e", "console.log('A');", "setTimeout(() => {}, 5000)"],
+    cwd,
+  });
+  assert("different argv arrays producing same commandLine do NOT collide/reuse", !resB.reused);
+  assert("different argv arrays get distinct process IDs", resA.info.id !== resB.info.id);
+
+  try {
+    stopBackgroundProcess(resA.info.id);
+  } catch {}
+  try {
+    stopBackgroundProcess(resB.info.id);
+  } catch {}
 }
 
 // ---------------------------------------------------------------------------

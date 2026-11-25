@@ -295,6 +295,7 @@ export type ProcessStatus = "running" | "exited" | "failed" | "stopped";
 export interface BackgroundProcessInfo {
   id: string;
   command: string;
+  argv?: string[];
   cwd: string;
   relCwd: string;
   pid: number | null;
@@ -336,6 +337,7 @@ function toPlain(info: BackgroundProcessInfo): BackgroundProcessInfo {
   return {
     id: info.id,
     command: info.command,
+    argv: info.argv,
     cwd: info.cwd,
     relCwd: info.relCwd,
     pid: info.pid,
@@ -518,6 +520,7 @@ export function stopBackgroundProcess(id: string): BackgroundProcessInfo {
 
 interface LaunchSpec {
   commandLine: string;
+  argv: string[];
   cwd: string;
   args: string[];
   launchBin: string;
@@ -586,7 +589,7 @@ function prepareLaunch(options: RunProcessOptions): LaunchSpec {
     useCmd = !/\.(exe|com)$/i.test(found);
   }
 
-  return { commandLine: argv.join(" "), cwd, args, launchBin, useCmd, env, isWindows };
+  return { commandLine: argv.join(" "), argv, cwd, args, launchBin, useCmd, env, isWindows };
 }
 
 function spawnChild(
@@ -653,6 +656,7 @@ function spawnDetached(spec: LaunchSpec, options: RunProcessOptions): DetachedSt
   const info: LiveProcess = {
     id,
     command: spec.commandLine,
+    argv: spec.argv,
     cwd: spec.cwd,
     relCwd: relOrSelf(spec.cwd),
     pid: child.pid ?? null,
@@ -694,10 +698,19 @@ function spawnDetached(spec: LaunchSpec, options: RunProcessOptions): DetachedSt
   return { info, child };
 }
 
-function findRunningByCommand(commandLine: string, cwd: string): LiveProcess | null {
+function findRunningByCommand(argv: string[], cwd: string): LiveProcess | null {
   for (const info of live.values()) {
     if (info.status !== "running") continue;
-    if (info.command !== commandLine) continue;
+    const infoArgv = info.argv ?? tokenizeCommand(info.command);
+    if (infoArgv.length !== argv.length) continue;
+    let match = true;
+    for (let i = 0; i < argv.length; i++) {
+      if (infoArgv[i] !== argv[i]) {
+        match = false;
+        break;
+      }
+    }
+    if (!match) continue;
     if (path.resolve(info.cwd) !== path.resolve(cwd)) continue;
     if (!isPidAlive(info.pid)) continue;
     return info;
@@ -795,7 +808,7 @@ function runWithWaitWindow(
 ): Promise<RunProcessResult> {
   const started = Date.now();
 
-  const existing = findRunningByCommand(spec.commandLine, spec.cwd);
+  const existing = findRunningByCommand(spec.argv, spec.cwd);
   if (existing) {
     const out = readLogTail(existing.logFile, maxBytes);
     const err = readLogTail(existing.errLogFile, maxBytes);
@@ -873,7 +886,7 @@ export function startBackgroundProcess(options: RunProcessOptions): {
   reused: boolean;
 } {
   const spec = prepareLaunch(options);
-  const existing = findRunningByCommand(spec.commandLine, spec.cwd);
+  const existing = findRunningByCommand(spec.argv, spec.cwd);
   if (existing) return { info: toPlain(existing), reused: true };
   return { info: toPlain(spawnDetached(spec, options).info), reused: false };
 }

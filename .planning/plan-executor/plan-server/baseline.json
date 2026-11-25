@@ -1,0 +1,18 @@
+{
+  "recordedAt": "2026-11-25T05:51:22.295Z",
+  "base": "main",
+  "commands": {
+    "pnpm --filter @workspace/server run typecheck": [],
+    "pnpm --filter @workspace/server run lint": [],
+    "pnpm --filter @workspace/server run test": [],
+    "pnpm --filter web run typecheck": [],
+    "pnpm --filter web run lint": [],
+    "pnpm --filter web run test": [],
+    "pnpm --filter @workspace/memory run typecheck": [],
+    "pnpm --filter @workspace/memory run lint": [],
+    "pnpm --filter @workspace/memory run test:all": [],
+    "pnpm --filter @workspace/agents run typecheck": [],
+    "pnpm --filter @workspace/agents run lint": [],
+    "pnpm --filter @workspace/agents run test": []
+  }
+}

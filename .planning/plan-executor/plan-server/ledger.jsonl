@@ -1,0 +1,13 @@
+{"ts":"2026-11-25T05:51:31.417Z","msg":"\n=== s0-prerequisite-the-packages-under-this--01 (open) S0 — Prerequisite: the packages under this plan have no test runner ==="}
+{"ts":"2026-11-25T05:51:31.420Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-server\\s0-prerequisite-the-packages-under-this--01"}
+{"ts":"2026-11-25T05:51:31.420Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\server\\apps\\server, D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\server\\apps\\web, D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\server\\packages\\agents"}
+{"ts":"2026-11-25T05:51:31.879Z","msg":"  installing dependencies in the worktree..."}
+{"ts":"2026-11-25T05:51:57.893Z","msg":"  implementer: t20"}
+{"ts":"2026-11-25T05:51:57.895Z","msg":"  attempt 1: briefing implementer"}
+{"ts":"2026-11-25T05:55:56.633Z","msg":"\n=== s0-prerequisite-the-packages-under-this--01 (open) S0 — Prerequisite: the packages under this plan have no test runner ==="}
+{"ts":"2026-11-25T05:55:56.641Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-server\\s0-prerequisite-the-packages-under-this--01"}
+{"ts":"2026-11-25T05:55:56.642Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\server, D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\web, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\agents"}
+{"ts":"2026-11-25T05:55:56.642Z","msg":"  focus:    apps/server, apps/web, packages/agents"}
+{"ts":"2026-11-25T05:55:57.522Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T05:56:00.146Z","msg":"  implementer: t21"}
+{"ts":"2026-11-25T05:56:00.147Z","msg":"  attempt 1: briefing implementer"}

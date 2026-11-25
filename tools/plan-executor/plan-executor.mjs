@@ -189,27 +189,66 @@ function parseChecklist(file) {
   let evidenceHeading = -1;
   const sectionCounts = new Map();
 
-  lines.forEach((line, index) => {
-    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+  const headingOf = (line) => /^#{1,6}\s+(.*)$/.exec(line);
+  const itemOf = (line) => /^\s*-\s*\[( |x|~)\]\s+(.*)$/.exec(line);
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const heading = headingOf(line);
     if (heading) {
       const title = heading[1].trim();
       if (/^evidence log/i.test(title)) evidenceHeading = index;
       if (/^#{2,3}\s/.test(line)) section = title;
-      return;
+      continue;
     }
-    const match = /^\s*-\s*\[( |x|~)\]\s+(.*)$/.exec(line);
-    if (!match) return;
+    const match = itemOf(line);
+    if (!match) continue;
+
+    // A checklist item can span several lines: the first line carries the
+    // statement, the indented lines below it carry the detail. Only the
+    // first line was used before, so a multi-line item reached the worker
+    // (and the independent reviewer) as a sentence cut in half - and both
+    // of them were judging the same fragment.
+    const head = match[2].trim();
+    const parts = [head];
+    let j = index + 1;
+    while (j < lines.length) {
+      const next = lines[j];
+      if (!next.trim()) {
+        // A blank line only continues the item when an indented line follows.
+        let k = j;
+        while (k < lines.length && !lines[k].trim()) k++;
+        const follows =
+          k < lines.length &&
+          /^\s+/.test(lines[k]) &&
+          !itemOf(lines[k]) &&
+          !headingOf(lines[k]);
+        if (!follows) break;
+        j = k;
+        continue;
+      }
+      if (headingOf(next) || itemOf(next)) break;
+      if (!/^\s+/.test(next)) break;
+      parts.push(next.trim());
+      j++;
+    }
+
     const n = (sectionCounts.get(section) ?? 0) + 1;
     sectionCounts.set(section, n);
     items.push({
       id: `${slug(section)}-${String(n).padStart(2, "0")}`,
       state: match[1] === " " ? "open" : match[1] === "~" ? "partial" : "done",
-      text: match[2].trim(),
+      // The whole item, on one line: the brief, the review and the evidence
+      // entry all use it.
+      text: parts.join(" ").replace(/\s+/g, " ").trim(),
+      // The first line only: used to find the item's line in the file again.
+      head,
       line: index + 1,
       section,
       raw: line,
     });
-  });
+    index = j - 1;
+  }
 
   return { raw, lines, items, evidenceHeading };
 }
@@ -1252,7 +1291,7 @@ async function mergeItem(result, ctx) {
 
   // the orchestrator owns the checklist and the evidence log
   const lines = fs.readFileSync(checklistAbs, "utf8").split(/\r?\n/);
-  const idx = lines.findIndex((l) => l.includes(item.text.slice(0, 60)));
+  const idx = lines.findIndex((l) => l.includes(item.head.slice(0, 60)));
   const partial = result.itemState === "partial";
   if (idx >= 0) {
     if (partial) {

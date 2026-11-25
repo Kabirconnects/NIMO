@@ -899,7 +899,12 @@ async function runGates({
   if (!allFiles.length) {
     failures.push({
       gate: "diff",
-      detail: "the worktree contains no changes at all - the item was not implemented",
+      detail:
+        "the worktree contains no changes at all - the item was not implemented. " +
+        "If the code in the worktree already looks like the item, it is not: " +
+        "the gates run the tests, and a rule that looks implemented but fails " +
+        "its test has a defect in it (a check that cannot fire, a value parsed " +
+        "into NaN, a comparison against the wrong field).",
     });
     return { failures, changed: allFiles, notes };
   }
@@ -1397,6 +1402,26 @@ function parseReport(screen) {
     const m = matches[matches.length - 1];
     return m.length > 1 ? m[1] : m[0];
   };
+  // A field can run over several lines: "TESTS:" is followed by one line per
+  // command, and taking only the first of them loses every command but one -
+  // which is how a worker that claimed "the suite exited 0" got away with
+  // claiming it about the only line the parser could see.
+  const block = (label) => {
+    const idx = joined.lastIndexOf(`${label}:`);
+    if (idx < 0) return null;
+    const after = joined.slice(idx + label.length + 1);
+    const out = [];
+    for (const line of after.split("\n")) {
+      const t = line.trim();
+      if (!t) {
+        if (out.length) break;
+        continue;
+      }
+      if (/^[A-Z_]{3,}:/.test(t)) break;
+      out.push(t);
+    }
+    return out.length ? out.join(" | ") : null;
+  };
   return {
     status: last(/STATUS:\s*(done|blocked)/gi)?.toLowerCase() ?? null,
     itemState: last(/ITEM_STATE:\s*(complete|partial)/gi)?.toLowerCase() ?? null,
@@ -1411,8 +1436,8 @@ function parseReport(screen) {
     verdict: last(/VERDICT:\s*(PASS|FAIL)/gi)?.toUpperCase() ?? null,
     resolved: last(/RESOLVED:\s*(yes|no)/gi)?.toLowerCase() ?? null,
     conflicts: last(/CONFLICTS:\s*(.+)/gi)?.trim() ?? null,
-    changed: last(/CHANGED:\s*(.+)/gi)?.trim() ?? null,
-    tests: last(/TESTS:\s*(.+)/gi)?.trim() ?? null,
+    changed: block("CHANGED") ?? last(/CHANGED:\s*(.+)/gi)?.trim() ?? null,
+    tests: block("TESTS") ?? last(/TESTS:\s*(.+)/gi)?.trim() ?? null,
     reasons: last(/REASONS:\s*([\s\S]+)/gi)?.trim() ?? null,
     blocked: last(/BLOCKED:\s*(.+)/gi)?.trim() ?? null,
     tail,
@@ -2030,6 +2055,26 @@ async function runItem(item, ctx) {
         .filter(Boolean)
         .join("; ");
       log(`  the worker said: ${said}`);
+
+      // Did the worker claim a pass it did not see?
+      //
+      // A worker reported "test:all exited 0" for a command the gates ran and
+      // saw fail. The gates are the truth, but the contradiction is worth
+      // naming: it says the worker never looked at the output it was shown,
+      // and the next attempt will be handed the same lesson.
+      for (const r of gateResult.commandResults ?? []) {
+        if (r.code === 0) continue;
+        const claimed = new RegExp(
+          `${r.cmd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\n]*exited? 0`,
+          "i",
+        );
+        if (claimed.test(report.tests ?? "")) {
+          log(
+            `  the worker claimed "${r.cmd}" passed - the gates saw it exit ${r.code}. ` +
+              `It did not read the output it was shown.`,
+          );
+        }
+      }
       try {
         fs.writeFileSync(path.join(briefDir, `attempt-${attempt}.screen.txt`), screen, "utf8");
       } catch {
@@ -2289,6 +2334,56 @@ async function mergeItem(result, ctx) {
   return { ok: true };
 }
 
+/**
+ * Record the items that could not be completed, in the checklist's Evidence Log.
+ *
+ * A blocked item keeps its box - that is the point - but nothing in the file
+ * said that anyone had tried. A reader of the checklist could not tell "we
+ * looked and could not" from "nobody looked", and the ledger that does know
+ * is not the file a human reads.
+ *
+ * One line per item, one commit for the whole batch: a checklist commit per
+ * blocked item would put noise on the base branch.
+ */
+async function recordBlockedItems(entries, ctx) {
+  const { checklistAbs, checklistRel, log } = ctx;
+  const blocked = entries.filter((e) => e.status !== "ready" && e.item);
+  if (!blocked.length) return;
+
+  const lines = fs.readFileSync(checklistAbs, "utf8").split(/\r?\n/);
+  const evidenceIdx = lines.findIndex((l) => /^#{1,6}\s+evidence log/i.test(l));
+  if (evidenceIdx < 0) {
+    log("  (no Evidence Log heading - the blocked items are only in the ledger)");
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  for (const entry of blocked) {
+    const why = (entry.failures ?? [])
+      .map((f) => `${f.gate}: ${f.detail}`)
+      .join(" | ")
+      .replace(/\s+/g, " ")
+      .slice(0, 300);
+    const line =
+      `- ${today} — ${entry.item.id}: ${entry.item.text.slice(0, 90)} ` +
+      `(NOT COMPLETED — the gates did not pass, so nothing was merged: ` +
+      `${why || "no reason recorded"}; the item stays open).`;
+    const existing = lines.findIndex(
+      (l, i) => i > evidenceIdx && l.includes(`— ${entry.item.id}:`),
+    );
+    if (existing >= 0) lines.splice(existing, 1);
+    lines.splice(evidenceIdx + 1, 0, line);
+  }
+  fs.writeFileSync(checklistAbs, lines.join("\n"), "utf8");
+  await git(["add", checklistRel], REPO_ROOT);
+  const c = await git(
+    ["commit", "-m", `docs(checklist): record the items that did not pass the gates`],
+    REPO_ROOT,
+    120_000,
+  );
+  log(`  recorded ${blocked.length} blocked item(s) in the Evidence Log`);
+  if (c.code !== 0) log(`  (the checklist commit failed: ${c.stderr?.slice(0, 200)})`);
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -2480,6 +2575,10 @@ async function main() {
     };
     fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf8");
   }
+
+  // The items that did not make it are recorded in the checklist too, so the
+  // file a human reads says what was attempted and not only what succeeded.
+  await recordBlockedItems(results, ctx);
 
   const done = Object.values(state.items).filter((s) => s.status === "done").length;
   const blocked = Object.values(state.items).filter((s) => s.status === "blocked").length;

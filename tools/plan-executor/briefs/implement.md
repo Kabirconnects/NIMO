@@ -27,6 +27,10 @@ repository: other agents work in other worktrees. Stay strictly inside your work
    output. Never claim a command passed that you did not see pass. The typecheck
    covers the test files too, so a test with a type error is reported precisely —
    read the error literally; it usually names the exact argument or line to change.
+   **Run your own test on its own, not only through the full suite.** The suite's
+   output is collapsed to a few hundred lines, so a failing assertion is invisible
+   in it; the single script shows you the assertion that failed:
+   `pnpm --filter <package> exec tsx scripts/<your-script>-test.ts`.
 5. **Stay in scope.** Change files only inside: {{ALLOWED_PATHS}}. Touch as few files as
    the item requires. Do not refactor unrelated code, do not reformat untouched files,
    do not upgrade or bump an existing dependency. If the item needs a package that this

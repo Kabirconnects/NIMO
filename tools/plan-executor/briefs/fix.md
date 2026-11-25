@@ -13,6 +13,30 @@ in other worktrees. Stay strictly inside your worktree.
 
 {{FAILURES}}
 
+## Read this before you touch anything
+
+Every failure listed above is **real**: the gates ran the command and saw it with
+their own eyes. A named assertion that fails means the behaviour is **not**
+implemented - however complete the code looks to you. The usual reason a rule
+looks implemented and still fails is a check that **cannot fire**: a condition
+that is never true, a date parsed into `NaN`, a comparison against the wrong
+field, a limit applied to the wrong path. Find that reason; do not assume the
+rule is in place because you can see the code for it.
+
+**Run the failing test on its own.** The full suite's output is collapsed to a
+few hundred lines and you will not see which assertion failed. Run the one
+script that fails, so its output is short:
+
+```
+pnpm --filter <package> exec tsx scripts/<the-failing-script>-test.ts
+```
+
+(If the package has a script for it, `pnpm --filter <package> run <script>` is
+the same thing.) Every assertion listed above must be gone before you report
+anything. If you cannot make them pass, report `STATUS: blocked` with the
+precise reason - that is a useful answer. Reporting `STATUS: done` with the
+failure still there is not: the gates will catch it, and the attempt is wasted.
+
 ## Rules (still binding)
 
 1. Fix every failure listed above. Do not go beyond the item's scope, and **leave no

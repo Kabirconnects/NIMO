@@ -548,6 +548,8 @@ function parseReport(screen) {
   };
   return {
     status: last(/STATUS:\s*(done|blocked)/gi)?.[1]?.toLowerCase() ?? null,
+    itemState: last(/ITEM_STATE:\s*(complete|partial)/gi)?.[1]?.toLowerCase() ?? null,
+    remaining: last(/REMAINING:\s*(.+)/gi)?.[1]?.trim() ?? null,
     verdict: last(/VERDICT:\s*(PASS|FAIL)/gi)?.[1]?.toUpperCase() ?? null,
     changed: last(/CHANGED:\s*(.+)/gi)?.[1]?.trim() ?? null,
     tests: last(/TESTS:\s*(.+)/gi)?.[1]?.trim() ?? null,
@@ -695,7 +697,12 @@ async function runItem(item, ctx) {
       WORKTREE: worktree,
       BASE_SHA: base,
       HEAD_SHA: head,
+      DIFF_FILE: path.join(briefDir, "review.diff"),
     };
+    // The reviewer may not be able to run shell commands in this environment, so
+    // the orchestrator writes the diff out for it to read.
+    const diffText = (await git(["diff", `${base}..${head}`], worktree)).stdout;
+    fs.writeFileSync(reviewVars.DIFF_FILE, diffText, "utf8");
     const reviewBrief = renderBrief(
       fs.readFileSync(path.join(BRIEFS, "review.md"), "utf8"),
       reviewVars,
@@ -704,7 +711,7 @@ async function runItem(item, ctx) {
     fs.writeFileSync(reviewFile, reviewBrief, "utf8");
     const reviewScreen = await sendAndWait(
       reviewer.address,
-      `Read the review brief at "${reviewFile}" and execute it exactly. Review the diff for item ${itemId}.`,
+      `Read the review brief at "${reviewFile}" and execute it exactly. The diff to review is at "${reviewVars.DIFF_FILE}". Review the diff for item ${itemId}.`,
       { timeout: args.turnTimeout },
     );
     const verdict = parseReport(reviewScreen);
@@ -733,6 +740,8 @@ async function runItem(item, ctx) {
       head,
       changed: gateResult.changed,
       commandResults: gateResult.commandResults,
+      itemState: report.itemState ?? "complete",
+      remaining: report.remaining ?? null,
       reviewer: reviewer.address,
       implementer: implementer.address,
     };
@@ -790,8 +799,15 @@ async function mergeItem(result, ctx) {
   // the orchestrator owns the checklist and the evidence log
   const lines = fs.readFileSync(checklistAbs, "utf8").split(/\r?\n/);
   const idx = lines.findIndex((l) => l.includes(item.text.slice(0, 60)));
+  const partial = result.itemState === "partial";
   if (idx >= 0) {
-    lines[idx] = lines[idx].replace(/^- \[( |~)\]/, "- [x]");
+    if (partial) {
+      // A partial item stays partial: keep [~] and state what still stands in the way.
+      const gap = result.remaining ? ` — remaining: ${result.remaining}` : "";
+      lines[idx] = lines[idx].replace(/^- \[.\]/, "- [~]").replace(/\s*$/, "") + gap;
+    } else {
+      lines[idx] = lines[idx].replace(/^- \[( |~)\]/, "- [x]");
+    }
   }
   const evidenceIdx = lines.findIndex((l) => /^#{1,6}\s+evidence log/i.test(l));
   const summary = result.commandResults
@@ -800,7 +816,8 @@ async function mergeItem(result, ctx) {
   const diffStat = result.changed.length;
   const entry =
     `- ${new Date().toISOString().slice(0, 10)} — ${item.id}: ${item.text.slice(0, 90)} ` +
-    `(${summary}; ${diffStat} file(s) changed; independent review: PASS).`;
+    `(${summary}; ${diffStat} file(s) changed; independent review: PASS` +
+    `${partial ? `; still partial: ${result.remaining ?? "gap not stated"}` : ""}).`;
   if (evidenceIdx >= 0) lines.splice(evidenceIdx + 1, 0, entry);
   fs.writeFileSync(checklistAbs, lines.join("\n"), "utf8");
   await git(["add", checklistRel], REPO_ROOT);

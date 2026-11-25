@@ -43,9 +43,12 @@ Finish your message with exactly these lines, and nothing after them:
 ```
 ITEM: {{ITEM_ID}}
 STATUS: done
+ITEM_STATE: complete | partial
 CHANGED: <comma-separated list of the files you changed>
 TESTS: <one line per gate command with its exit code>
 ```
+
+If the item is only partly satisfied, add `REMAINING: <what still stands in the way>`.
 
 If it still cannot be done without breaking a rule, end with:
 

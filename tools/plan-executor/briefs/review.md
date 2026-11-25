@@ -13,16 +13,12 @@ got wrong or left behind.
 - Worktree: {{WORKTREE}}
 - Base commit (before the change): {{BASE_SHA}}
 - Current branch head: {{HEAD_SHA}}
+- **The diff itself is written to: {{DIFF_FILE}}** — read that file, it is the complete diff.
 
-Read the change yourself:
-
-```
-cd "{{WORKTREE}}"
-git diff {{BASE_SHA}}..{{HEAD_SHA}}
-```
-
-Read the surrounding source for anything the diff touches. You are reviewing the code, not
-the description of it.
+Read it with your file-reading tool (read the file above). If you can also run shell
+commands, `git diff {{BASE_SHA}}..{{HEAD_SHA}}` in the worktree shows the same thing.
+Read the surrounding source for anything the diff touches. You are reviewing the code,
+not the description of it.
 
 ## What to check, in order
 

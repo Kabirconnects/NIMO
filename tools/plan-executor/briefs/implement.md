@@ -53,8 +53,17 @@ Finish your message with exactly these lines, and nothing after them:
 ```
 ITEM: {{ITEM_ID}}
 STATUS: done
+ITEM_STATE: complete | partial
 CHANGED: <comma-separated list of the files you changed>
 TESTS: <one line per gate command with its exit code, e.g. "typecheck => exit 0">
+```
+
+`ITEM_STATE: complete` means the item is fully satisfied now.
+`ITEM_STATE: partial` means you closed part of the gap but something still stands in the
+way — in that case add one more line:
+
+```
+REMAINING: <what is still missing, in one sentence>
 ```
 
 If you cannot finish the item without breaking a rule, end with:

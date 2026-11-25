@@ -63,6 +63,11 @@ touch, and S0 is what creates one.
       The 501 answers must say what is missing without using the words the
       no-leftovers gate rejects (`TODO`, `FIXME`, `stub`, "not implemented") — e.g.
       `"Listing users is not available in this build"`.
+      There is no database in the test environment, so a request that gets past the
+      auth middleware cannot be answered (the user lookup waits for a database that is
+      not there). Assert the 401 through the route, and cover the 501 by calling the
+      controller function directly with a fake response object that records `status()`
+      and `json()`.
 
 ## S2 — Server: login has no rate limiting
 

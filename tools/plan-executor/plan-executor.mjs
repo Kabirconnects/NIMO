@@ -1382,11 +1382,14 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
     if (/API Error:/i.test(screenTail)) {
       apiErrors++;
       if (apiErrors <= 4) {
+        // The backoff grows: a gateway that is up in a moment and a gateway
+        // that is down for five minutes need different amounts of patience.
+        const wait = 15_000 * 2 ** (apiErrors - 1);
         onLog?.(
-          `    the model API failed (${apiErrors}/4) - waiting and sending the prompt again`,
+          `    the model API failed (${apiErrors}/4) - waiting ${Math.round(wait / 1000)}s and sending the prompt again`,
         );
         await hc(["send", address, text, "--json"]);
-        await sleep(15_000);
+        await sleep(wait);
         continue;
       }
       onLog?.(`    the model API failed four times - giving up on this turn`);

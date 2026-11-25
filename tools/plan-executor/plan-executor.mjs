@@ -920,7 +920,35 @@ async function spawnAgent(name, cwd, parent) {
 
   const args = ["run", "--bg", "--json", "--no-notify", "--name", name, "--cwd", cwd];
   if (parent) args.push("--parent", parent);
-  args.push("claude");
+  // Claude Code asks a classifier whether a command is safe before it runs it.
+  // On this machine that classifier is unavailable, so every command comes
+  // back "Not run - auto mode's check had no usable answer" and the worker
+  // writes blind (and guesses wrong). Pre-approving the tools the worker
+  // actually needs - running the repo's own pnpm scripts, reading files,
+  // editing them - removes the question entirely.
+  args.push(
+    "claude",
+    "--allowedTools",
+    "Bash(pnpm:*)",
+    "Bash(git status:*)",
+    "Bash(git diff:*)",
+    "Bash(git log:*)",
+    "Bash(ls:*)",
+    "Bash(cat:*)",
+    "Bash(pwd:*)",
+    "Bash(echo:*)",
+    "Bash(dir:*)",
+    "Bash(type:*)",
+    "Bash(where:*)",
+    "Bash(rg:*)",
+    "Bash(grep:*)",
+    "Bash(find:*)",
+    "Read",
+    "Edit",
+    "Write",
+    "Glob",
+    "Grep",
+  );
   let r = await hc(args);
   let parsed = null;
   try {
@@ -1035,6 +1063,7 @@ async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) 
   let sawWorking = false;
   let resent = false;
   let unsticks = 0;
+  let blockedCommands = 0;
   for (;;) {
     const status = await agentStatus(address);
     const state = status?.status?.state ?? status?.state ?? "unknown";
@@ -1059,6 +1088,28 @@ async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) 
       unsticks++;
       const what = await unstick(address);
       if (what) {
+        await sleep(1500);
+        continue;
+      }
+    }
+
+    // A worker that cannot run commands keeps asking for them: every attempt
+    // comes back "Not run - auto mode's check had no usable answer". Left
+    // alone it burns the whole turn asking again (we watched one spend ten
+    // minutes on it). Say so and tell it to finish without them.
+    if (/Not run . auto mode|Classifier unavailable/i.test(current)) {
+      blockedCommands++;
+      if (blockedCommands === 3) {
+        await hc(["keys", address, "esc"]);
+        await sleep(1500);
+        await hc([
+          "send",
+          address,
+          "Stop running shell commands - they are blocked in this environment. " +
+            "Write the code and report the item with the trailer; the orchestrator " +
+            "runs the gates itself.",
+          "--json",
+        ]);
         await sleep(1500);
         continue;
       }

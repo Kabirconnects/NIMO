@@ -46,10 +46,9 @@ repository: other agents work in other worktrees. Stay strictly inside your work
 9. **Do not stop to ask for permission.** Implement the item directly. If the environment
    offers to run a plan you wrote, or asks whether to proceed, choose the option that lets
    you continue and keep working — the orchestrator waits for the diff, not for a
-   conversation. If a command will not run, stop retrying: this environment may refuse to
-   execute shell commands (the Bash classifier can be unavailable). If that happens, say so
-   in your report and move on — the orchestrator runs the verification commands itself and
-   judges your work by the diff, not by your claim that it passes.
+   conversation. If a command is refused, say so in your report and move on; do not retry
+   it in a loop. The orchestrator runs the verification commands itself and judges your
+   work by the diff, not by your claim that it passes.
 10. **A test has to fail on the old code.** The gates roll the source back to the
     pre-change version and run your tests again. A test that passes on the old code
     proves nothing and the item is rejected: feed the code the exact input the old

@@ -518,3 +518,69 @@
 {"ts":"2026-11-25T07:40:29.350Z","msg":"s2-server-login-has-no-rate-limiting-01: blocked, left in place for inspection"}
 {"ts":"2026-11-25T07:40:29.350Z","msg":"\nsummary: 3 merged, 2 blocked"}
 {"ts":"2026-11-25T07:40:29.350Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-server\\state.json"}
+{"ts":"2026-11-25T07:48:02.206Z","msg":"\n=== s1-server-user-routes-have-no-authentica-01 (open) S1 — Server: user routes have no authentication ==="}
+{"ts":"2026-11-25T07:48:02.216Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-server\\s1-server-user-routes-have-no-authentica-01"}
+{"ts":"2026-11-25T07:48:02.216Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\server, D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\web, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\agents"}
+{"ts":"2026-11-25T07:48:02.216Z","msg":"  focus:    GET /, apps/server/src/modules/user/users.routes.ts:16,25,26,27, // TODO, apps/server/src/lib/env.ts, apps/server/src/modules/user/users.routes.ts"}
+{"ts":"2026-11-25T07:48:02.685Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T07:48:02.688Z","msg":"    seeded env files from the examples: apps/server/.env"}
+{"ts":"2026-11-25T07:48:05.036Z","msg":"  implementer: t2j"}
+{"ts":"2026-11-25T07:48:05.038Z","msg":"  attempt 1: briefing implementer"}
+{"ts":"2026-11-25T07:49:12.855Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T07:49:13.735Z","msg":"    gate: pnpm --filter @workspace/server run typecheck"}
+{"ts":"2026-11-25T07:49:21.617Z","msg":"    gate: pnpm --filter @workspace/server run lint"}
+{"ts":"2026-11-25T07:49:23.758Z","msg":"    gate: pnpm --filter @workspace/server run test:all"}
+{"ts":"2026-11-25T07:49:24.652Z","msg":"    gate: pnpm --filter web run typecheck"}
+{"ts":"2026-11-25T07:49:25.796Z","msg":"    gate: pnpm --filter web run lint"}
+{"ts":"2026-11-25T07:49:26.622Z","msg":"    gate: pnpm --filter web run test"}
+{"ts":"2026-11-25T07:49:27.495Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T07:49:29.973Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T07:49:31.612Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T07:49:35.898Z","msg":"    gate: pnpm --filter @workspace/agents run typecheck"}
+{"ts":"2026-11-25T07:49:39.113Z","msg":"    gate: pnpm --filter @workspace/agents run lint"}
+{"ts":"2026-11-25T07:49:40.835Z","msg":"    gate: pnpm --filter @workspace/agents run test"}
+{"ts":"2026-11-25T07:49:47.271Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/server run test:all)"}
+{"ts":"2026-11-25T07:49:48.430Z","msg":"    proof: inconclusive - the suite could not run against the old source (no named test failure, probably a compile error)"}
+{"ts":"2026-11-25T07:49:48.474Z","msg":"  gates failed: command, command, proof"}
+{"ts":"2026-11-25T07:49:48.475Z","msg":"  attempt 2: briefing implementer"}
+{"ts":"2026-11-25T07:50:07.900Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T07:50:08.673Z","msg":"    gate: pnpm --filter @workspace/server run typecheck"}
+{"ts":"2026-11-25T07:50:15.945Z","msg":"    gate: pnpm --filter @workspace/server run lint"}
+{"ts":"2026-11-25T07:50:17.934Z","msg":"    gate: pnpm --filter @workspace/server run test:all"}
+{"ts":"2026-11-25T07:50:21.310Z","msg":"    gate: pnpm --filter web run typecheck"}
+{"ts":"2026-11-25T07:50:22.450Z","msg":"    gate: pnpm --filter web run lint"}
+{"ts":"2026-11-25T07:50:23.236Z","msg":"    gate: pnpm --filter web run test"}
+{"ts":"2026-11-25T07:50:24.119Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T07:50:26.910Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T07:50:28.892Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T07:50:33.359Z","msg":"    gate: pnpm --filter @workspace/agents run typecheck"}
+{"ts":"2026-11-25T07:50:36.658Z","msg":"    gate: pnpm --filter @workspace/agents run lint"}
+{"ts":"2026-11-25T07:50:38.353Z","msg":"    gate: pnpm --filter @workspace/agents run test"}
+{"ts":"2026-11-25T07:50:44.877Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/server run test:all)"}
+{"ts":"2026-11-25T07:50:49.383Z","msg":"    proof: the tests fail without the change (1 new failure(s))"}
+{"ts":"2026-11-25T07:50:49.430Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T07:50:49.431Z","msg":"  attempt 3: briefing implementer"}
+{"ts":"2026-11-25T07:51:12.126Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T07:51:13.029Z","msg":"    gate: pnpm --filter @workspace/server run typecheck"}
+{"ts":"2026-11-25T07:51:20.358Z","msg":"    gate: pnpm --filter @workspace/server run lint"}
+{"ts":"2026-11-25T07:51:22.287Z","msg":"    gate: pnpm --filter @workspace/server run test:all"}
+{"ts":"2026-11-25T07:51:24.717Z","msg":"    gate: pnpm --filter web run typecheck"}
+{"ts":"2026-11-25T07:51:25.804Z","msg":"    gate: pnpm --filter web run lint"}
+{"ts":"2026-11-25T07:51:26.618Z","msg":"    gate: pnpm --filter web run test"}
+{"ts":"2026-11-25T07:51:27.519Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T07:51:30.153Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T07:51:31.828Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T07:51:35.996Z","msg":"    gate: pnpm --filter @workspace/agents run typecheck"}
+{"ts":"2026-11-25T07:51:39.180Z","msg":"    gate: pnpm --filter @workspace/agents run lint"}
+{"ts":"2026-11-25T07:51:40.885Z","msg":"    gate: pnpm --filter @workspace/agents run test"}
+{"ts":"2026-11-25T07:51:47.319Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/server run test:all)"}
+{"ts":"2026-11-25T07:51:51.634Z","msg":"    proof: the tests fail without the change (1 new failure(s))"}
+{"ts":"2026-11-25T07:51:51.693Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T07:51:51.881Z","msg":"\n=== s2-server-login-has-no-rate-limiting-01 (open) S2 — Server: login has no rate limiting ==="}
+{"ts":"2026-11-25T07:51:51.882Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-server\\s2-server-login-has-no-rate-limiting-01"}
+{"ts":"2026-11-25T07:51:51.883Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\server, D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\web, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\agents"}
+{"ts":"2026-11-25T07:51:51.883Z","msg":"  focus:    apps/server/src/modules/user/users.routes.ts:19, apps/server/src/modules/user/users.routes.ts"}
+{"ts":"2026-11-25T07:51:52.283Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T07:51:52.285Z","msg":"    seeded env files from the examples: apps/server/.env"}
+{"ts":"2026-11-25T07:51:54.631Z","msg":"  implementer: t2k"}
+{"ts":"2026-11-25T07:51:54.633Z","msg":"  attempt 1: briefing implementer"}

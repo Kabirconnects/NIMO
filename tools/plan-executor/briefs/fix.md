@@ -28,8 +28,8 @@ other worktrees. Stay strictly inside your worktree.
    *different* inputs are treated differently is no proof if the old code already did
    that; the inputs must collide in the old code and not in the new one.
 4. Re-run the gate commands and paste the real output. Never claim a pass you did not see.
-   If a command cannot run at all (the Bash classifier may be unavailable), say so and
-   stop retrying — the orchestrator runs the gates itself.
+   If a command is refused, say so in your report and move on — do not retry it in a loop.
+   The orchestrator runs the gates itself and judges the diff, not your claim that it passes.
    If a command comes back as **not recognized**, the tool is not available to that
    package: check the package's own dependencies before changing what the script
    calls. A script that points at a tool the package does not depend on fails for

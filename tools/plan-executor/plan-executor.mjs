@@ -1859,7 +1859,9 @@ async function runItem(item, ctx) {
     const previous = state.items[itemId];
     if (previous?.failures?.length) {
       lastFailures = previous.failures;
-      startAttempt = 2;
+      // Never start past the last attempt: a run with --attempts 1 still gets
+      // one try, it just starts from the fix brief.
+      startAttempt = Math.min(2, args.attempts);
       log(`  the previous run failed with: ${previous.failures.map((f) => f.gate).join(", ")}`);
       log("  starting from the fix brief, with those failures in it");
     }

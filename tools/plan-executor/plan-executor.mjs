@@ -773,6 +773,21 @@ function hasTrailer(screen, regex) {
 }
 
 /**
+ * The part of the screen that belongs to the current turn.
+ *
+ * The terminal scrolls, so the previous turn's report trailer is often still
+ * visible near the bottom when the next prompt is sent. Reading it as the new
+ * turn's answer makes the harness give up while the worker is still working —
+ * which is how a worker ends up "retrying" without ever seeing the failure it
+ * was given. The echoed prompt marks where this turn starts.
+ */
+function screenSincePrompt(screen, marker) {
+  if (!marker) return screen;
+  const idx = screen.lastIndexOf(marker);
+  return idx >= 0 ? screen.slice(idx) : screen;
+}
+
+/**
  * Send a prompt and wait for that turn to end. Returns the screen text afterwards.
  *
  * `done` is a regex for the report trailer. The trailer is the reliable signal
@@ -784,6 +799,10 @@ async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) 
   const deadline = Date.now() + timeout * 1000;
   // A freshly spawned agent can report "idle" for a moment before it starts.
   const startDeadline = Date.now() + 30_000;
+  // A short, stable prefix of the prompt: it is echoed on screen when the
+  // agent receives it, and it marks the start of this turn. Kept short so the
+  // terminal cannot wrap it.
+  const marker = text.slice(0, 16).trim();
   let sawWorking = false;
   let resent = false;
   let unsticks = 0;
@@ -793,7 +812,8 @@ async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) 
     if (state === "working") sawWorking = true;
 
     const screen = await readScreen(address);
-    if (done && hasTrailer(screen, done)) return screen;
+    const current = screenSincePrompt(screen, marker);
+    if (done && hasTrailer(current, done)) return current;
 
     if (state === "blocked" && unsticks < 2) {
       unsticks++;
@@ -808,7 +828,7 @@ async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) 
       // The turn is over. Re-read once, in case the final message was still
       // being painted when the state flipped.
       await sleep(1500);
-      const again = await readScreen(address);
+      const again = screenSincePrompt(await readScreen(address), marker);
       if (done && hasTrailer(again, done)) return again;
       return again;
     }
@@ -822,7 +842,7 @@ async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) 
       continue;
     }
 
-    if (Date.now() > deadline) return await readScreen(address);
+    if (Date.now() > deadline) return screenSincePrompt(await readScreen(address), marker);
     await sleep(3000);
   }
 }
@@ -994,6 +1014,10 @@ async function runItem(item, ctx) {
       done: /STATUS:\s*(done|blocked)/i,
     });
     const report = parseReport(screen);
+
+    if (report.status === null) {
+      log(`  note: the worker did not end with a status trailer - judging the diff alone`);
+    }
 
     if (report.status === "blocked") {
       const reason = report.blocked ?? "(no reason given)";

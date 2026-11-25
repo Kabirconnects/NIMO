@@ -1468,6 +1468,9 @@ async function resolveRebaseConflict({ result, ctx, baseSha, log }) {
   }
 
   const note = (report.conflicts ?? "the conflict was resolved")
+    // The terminal's own status line follows the report on the same screen
+    // row when the report wraps. It is never part of what the agent said.
+    .split("\u273b")[0]
     .replace(/\s+/g, " ")
     .slice(0, 300);
   return { ok: true, note, resolvedBy: report.resolved };

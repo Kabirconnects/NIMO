@@ -3,6 +3,10 @@
  * No test framework required; failures throw and exit non-zero.
  */
 
+// IMPORTANT: Set environment variables BEFORE importing any app modules (like env.ts or app.ts)
+process.env.JWT_SECRET = "0123456789abcdef0123456789abcdef";
+process.env.AI_MODEL = "claude-sonnet-5";
+
 import { createUserSchema, loginSchema } from "../src/modules/user/users.schema.js";
 import { chatSchema } from "../src/modules/agent/agents.schema.js";
 import { createApp } from "../src/app.js";
@@ -19,6 +23,10 @@ function assert(label: string, condition: boolean): void {
     console.error(`  ✗ ${label}`);
     failed++;
   }
+}
+
+function assertTest(label: string, condition: boolean): void {
+  assert(label, condition);
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +195,59 @@ async function runApiTests() {
 }
 
 await runApiTests();
+
+// ---------------------------------------------------------------------------
+// Login Rate Limiting
+// ---------------------------------------------------------------------------
+console.log("login rate limit");
+
+async function runRateLimitTest() {
+  const app = createApp();
+  const server = app.listen(0);
+  const address = server.address();
+  const port = typeof address === "object" && address !== null ? address.port : 4000;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    // 1. Invalid body request returns 400 and doesn't affect limit state
+    const badRes = await fetch(`${baseUrl}/users/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "not-an-email", password: "" }),
+      signal: AbortSignal.timeout(5000),
+    });
+    assertTest("invalid login body returns 400", badRes.status === 400);
+
+    // 2. Send failed login attempts with invalid email structure to be answered by validation before any query / DB access
+    const loginPayload = { email: "not-an-email", password: "wrongpassword" };
+    for (let i = 1; i <= 4; i++) {
+      const res = await fetch(`${baseUrl}/users/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(loginPayload),
+        signal: AbortSignal.timeout(5000),
+      });
+      assertTest(`login attempt ${i} returns 400`, res.status === 400);
+    }
+
+    // 3. 5th attempt with invalid email format is rate limited (429) because IP is rate limited
+    const limitedRes = await fetch(`${baseUrl}/users/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(loginPayload),
+      signal: AbortSignal.timeout(5000),
+    });
+    assertTest("5th login attempt returns 429 Too Many Requests", limitedRes.status === 429);
+
+    const json = await limitedRes.json() as { success: boolean; error: string };
+    assertTest("rate limit response has success: false", json.success === false);
+    assertTest("rate limit response has error message", json.error.includes("Too many login attempts"));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+await runRateLimitTest();
 
 // ---------------------------------------------------------------------------
 // Summary

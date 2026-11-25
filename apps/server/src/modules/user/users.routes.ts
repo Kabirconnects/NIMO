@@ -10,13 +10,14 @@ import {
   updateUser,
 } from "./users.controller.js"
 import { authMiddleware } from "../../middleware/auth.middleware.js"
+import { rateLimit } from "../../middleware/rate-limit.middleware.js"
 
 const router: Router = express.Router()
 
 router.get("/", authMiddleware, listUsers)
 router.post("/", createUser)
 
-router.post("/login", login)
+router.post("/login", rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), login)
 router.post("/logout", logout)
 
 // "/me" must be registered before "/:id", otherwise "me" is read as an id.

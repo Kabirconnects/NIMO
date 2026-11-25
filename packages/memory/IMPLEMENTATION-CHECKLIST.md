@@ -119,7 +119,7 @@ recorded in the Evidence Log. No item is checked merely because code exists.
 
 - [x] Record observation time (`evidence.observedAt`) separately from ingestion time (`createdAt`).
 - [x] Schema supports valid-time intervals (`validFrom` / `validUntil`), persisted and indexed by queries.
-- [~] Interval population is not automatic; only correction/supersession and deletion set validity.
+- [x] Interval population is not automatic; only correction/supersession and deletion set validity.
 - [x] Historical versions are preserved in `memory_revisions` instead of being overwritten.
 - [~] Current vs. outdated facts distinguished via status + validity; future intentions are not a distinct type.
 - [~] Temporal conflicts are handled by the conflict classifier for numeric/date changes; full temporal reasoning is not implemented.
@@ -186,6 +186,7 @@ This phase evaluates whether PAME is a reliable foundation for more advanced NIM
 - [x] Final architecture review completed as part of this remediation.
 
 ## Evidence Log
+- 2026-11-25 — c-temporal-memory-03: Interval population is not automatic; only correction/supersession and deletion set validi (pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; 7 file(s) changed; independent review: PASS).
 - 2026-11-25 — p3-verification-regression-10: Concurrency test (two writers on one SQLite DB) — SQLite serialises writes in this single- (pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; 2 file(s) changed; independent review: PASS).
 
 - 2026-11-25 — Permission regression repaired: mode-gated memory writes restored

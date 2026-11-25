@@ -1308,8 +1308,11 @@ async function main() {
   }
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
-  // merge phase, in checklist order, one at a time
+  // merge phase, one at a time, in checklist order (not completion order, so
+  // the sequence is deterministic and dependent items land in the right order)
   log("\n=== merge phase ===");
+  const order = new Map(queue.map((item, i) => [item.id, i]));
+  results.sort((a, b) => (order.get(a.itemId) ?? 0) - (order.get(b.itemId) ?? 0));
   for (const entry of results) {
     if (entry.status !== "ready") {
       log(`${entry.itemId}: blocked, left in place for inspection`);

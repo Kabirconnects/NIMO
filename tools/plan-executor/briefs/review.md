@@ -31,6 +31,24 @@ without a test that pins the old behaviour, the verdict is FAIL.
 {{REMOVED_GUARDS}}
 ```
 
+## The proof, and what it does not cover
+
+The orchestrator re-ran the tests against the pre-change source. These assertions
+FAILED without the change — each one demonstrates the change:
+
+{{PROVING_ASSERTIONS}}
+
+These assertions in the item's own test file PASSED against the pre-change source
+as well, so on their own they prove nothing. They may be legitimate regression
+guards (a check that some behaviour did not change); what they must not be is the
+only assertion covering one of the item's new behaviours:
+
+{{TAUTOLOGY_ASSERTIONS}}
+
+The item may name more than one behaviour. For EACH behaviour the item names, say
+which of the failing assertions above covers it. If a behaviour has none of them,
+the verdict is FAIL: an assertion that passes on both sides is true by construction.
+
 ## What to check, in order
 
 1. **Completeness** — does the change actually implement the item as written, including the
@@ -43,6 +61,8 @@ without a test that pins the old behaviour, the verdict is FAIL.
    that asserts nothing meaningful, or no test at all for a source change, is a FAIL.
    Watch for assertions that are true by construction: a check that runs *after* a
    repair, migration, seed or fixup step proves nothing about the thing it checks.
+   Use the proof lists above: every behaviour the item names needs an assertion that
+   failed without the change.
 4. **Correctness** — real bugs: wrong conditions, off-by-one, missing null/empty handling,
    unhandled error paths, incorrect async ordering, races, wrong SQL, resource leaks.
 5. **Regressions** — does this break existing behaviour or existing tests?

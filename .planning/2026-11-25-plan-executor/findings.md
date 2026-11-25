@@ -433,6 +433,24 @@ Two lessons, both mechanical:
 The general rule: **a proof is per-requirement, not per-file.** A file that fails
 once proves that *something* changed, and nothing about the rest.
 
+**Now implemented in the harness** (`tools/plan-executor/plan-executor.mjs`):
+
+- `collectPasses(output)` — the mirror of `collectFailures`: it reads the passing
+  assertions out of a suite's output.
+- `tautologiesIn(oldPasses, changedTestText)` — the assertions that pass against
+  the pre-change source *and* are written in the item's own test file.
+- The proof gate now names both lists: the assertions that fail without the change
+  (the ones that demonstrate it) and the tautologies. The evidence line carries the
+  count, and the review brief (`briefs/review.md`) gives the reviewer both lists and
+  asks it to map **every** behaviour the item names onto a failing assertion —
+  "if a behaviour has none of them, the verdict is FAIL".
+
+The harness does not reject tautologies on its own: an assertion that passes on
+both sides is often exactly what it should be ("the owner check still refuses
+another owner's memory"). What it must not be is the *only* assertion covering one
+of the item's behaviours — and that is a judgement, so the reviewer makes it, with
+the facts in front of it.
+
 ## 6. Windows specifics
 
 - `pnpm` on PATH resolves to a `.cmd` ⇒ shell execution needed for spawn.

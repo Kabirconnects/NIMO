@@ -21,6 +21,8 @@ import {
   hasTrailer,
   resolveCommandListConflict,
   findFailingScripts,
+  collectPasses,
+  tautologiesIn,
 } from "./plan-executor.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -585,6 +587,59 @@ check(
 check(
   "a failure from no script finds nothing",
   findFailingScripts(fixtureRoot, fixturePkg, ["[NOPE] never happened"]),
+  [],
+);
+
+// ---------------------------------------------------------------------------
+// collectPasses + tautologiesIn: an assertion that passes on both sides
+// proves nothing
+// ---------------------------------------------------------------------------
+
+const suiteOutput = [
+  "PASS [EVIDENCE AGE] memory with recent evidence is retrievable",
+  "FAIL [EVIDENCE AGE] memory with evidence older than maxEvidenceAgeDays is NOT retrievable",
+  "PASS [EVOLUTION] evolve with cause 'new_evidence' changes nothing when allowAutomaticEvolution is false",
+  "PASS [SKILLS] confidence drops to 0.5 after 1 success 1 fail  0.50",
+  "RESULT: 154 passed, 0 failed, 154 total",
+  "",
+].join("\n");
+
+check(
+  "the passing assertions are read from the suite output",
+  collectPasses(suiteOutput),
+  [
+    "[EVIDENCE AGE] memory with recent evidence is retrievable",
+    "[EVOLUTION] evolve with cause 'new_evidence' changes nothing when allowAutomaticEvolution is false",
+    "[SKILLS] confidence drops to 0.5 after 1 success 1 fail  0.50",
+  ],
+);
+
+check(
+  "a summary line is not an assertion",
+  collectPasses("RESULT: 154 passed, 0 failed, 154 total").length,
+  0,
+);
+
+const itemTestText = [
+  'check(isRetrievable(memOld, OWNER, p5) === false, "[EVIDENCE AGE] memory with evidence older than maxEvidenceAgeDays is NOT retrievable");',
+  'check(resAuto.changed === false, "[EVOLUTION] evolve with cause \'new_evidence\' changes nothing when allowAutomaticEvolution is false");',
+].join("\n");
+
+check(
+  "the assertions of the item's own test file that pass on both sides are named",
+  tautologiesIn(collectPasses(suiteOutput), itemTestText),
+  ["[EVOLUTION] evolve with cause 'new_evidence' changes nothing when allowAutomaticEvolution is false"],
+);
+
+check(
+  "an assertion from another file is not a tautology of this item",
+  tautologiesIn(["[SKILLS] confidence drops to 0.5 after 1 success 1 fail  0.50"], itemTestText),
+  [],
+);
+
+check(
+  "with no changed test file there are no tautologies",
+  tautologiesIn(collectPasses(suiteOutput), ""),
   [],
 );
 

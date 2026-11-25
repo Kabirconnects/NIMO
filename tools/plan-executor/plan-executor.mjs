@@ -395,6 +395,62 @@ function collectFailures(output) {
 }
 
 /**
+ * Passing test identifiers in a suite's output, e.g. "PASS [EVIDENCE AGE] ...".
+ *
+ * The mirror image of collectFailures. It is what lets the proof say more than
+ * "the suite fails": an assertion that PASSES against the pre-change source
+ * cannot detect the change, so an assertion that passes on both sides is true
+ * by construction - it may be a regression guard, but it proves nothing about
+ * what this item changed.
+ */
+function collectPasses(output) {
+  const found = new Set();
+  const patterns = [
+    /^\s*PASS\s+(.+?)\s*$/,
+    /^\s*[✓✔]\s*(.+?)\s*$/,
+  ];
+  for (const line of output.split(/\r?\n/)) {
+    for (const re of patterns) {
+      const m = re.exec(line);
+      if (m) {
+        const name = m[1].trim();
+        if (name) found.add(name);
+        break;
+      }
+    }
+  }
+  return [...found];
+}
+
+/**
+ * The assertions that pass against the pre-change source AND live in the
+ * item's own test file.
+ *
+ * The proof gate answers one question: does the suite fail without the change?
+ * That is a single signal for the whole file. An item that names three
+ * behaviours can satisfy it with one failing assertion while the other two are
+ * covered by assertions that were already true before the change - and those
+ * assertions are invisible in the gate's output.
+ *
+ * P0.7 is the example: the age and the confidence-floor assertions failed
+ * without the change, but the two evolution assertions passed on the old code
+ * too, because the pair of memories they used was classified `unrelated` (and
+ * later `duplicate`) rather than `contradiction`. The item looked proved and
+ * was not.
+ *
+ * So the harness names the assertions that pass on both sides and hands them
+ * to the reviewer together with the item's other behaviours. It does not decide
+ * by itself: an assertion that passes on both sides is often a legitimate
+ * regression guard ("the owner check still refuses another owner's memory").
+ * What it must not be is the ONLY assertion covering one of the item's
+ * behaviours - and that is a judgement, so the reviewer makes it.
+ */
+function tautologiesIn(oldPasses, changedTestText) {
+  if (!changedTestText) return [];
+  return oldPasses.filter((name) => changedTestText.includes(name));
+}
+
+/**
  * Find the test file that produced these failures.
  *
  * The suite's output names the failing assertion ("[EVIDENCE AGE] memory
@@ -598,7 +654,7 @@ function exportedNames(text) {
   return names;
 }
 
-async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, baseline, onLog }) {
+async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, baseline, onLog, testChanged = [] }) {
   const { cmds, uncovered, testCmds } = proofCommandsFor(sourceChanged, gates, worktree);
   if (!sourceChanged.length || !testCmds.length) return null;
   if (!cmds.length) {
@@ -658,6 +714,19 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
       }
     }
     const stillGreen = [];
+    // The text of the item's own test files. An assertion that passes against
+    // the pre-change source and is written in one of these files is an
+    // assertion that cannot detect this change - it was already true. It may
+    // be a regression guard, but it is not evidence.
+    const changedTestText = testChanged
+      .map((rel) => {
+        try {
+          return fs.readFileSync(path.join(worktree, rel), "utf8");
+        } catch {
+          return "";
+        }
+      })
+      .join("\n");
     for (const cmd of cmds) {
       const r = await execCmd(cmd, { cwd: worktree, timeout: 1_200_000 });
       const output = `${r.stdout}\n${r.stderr}`;
@@ -732,9 +801,25 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
       onLog?.(
         `    proof: the tests fail without the change (${newFailures.length} new failure(s))`,
       );
+      // The assertions that pass on BOTH sides cannot detect this change. The
+      // harness does not reject them - many of them are regression guards that
+      // are supposed to pass either way - but it names them, because an item
+      // that names three behaviours and proves one of them is not proved.
+      const tautologies = tautologiesIn(collectPasses(output), changedTestText);
+      const tautologyNote = tautologies.length
+        ? `; ${tautologies.length} assertion(s) in the item's own test file pass without the change as well, so they prove nothing on their own: ${tautologies.slice(0, 3).join(" | ")}`
+        : "";
+      if (tautologies.length) {
+        onLog?.(
+          `    proof: ${tautologies.length} assertion(s) in the item's test file pass without the change too ` +
+            `(they cannot detect it): ${tautologies.slice(0, 2).join(" | ")}`,
+        );
+      }
       return {
         ok: true,
-        detail: `${newFailures.length} named failure(s) without the change: ${newFailures.slice(0, 3).join(" | ")}`,
+        detail: `${newFailures.length} named failure(s) without the change: ${newFailures.slice(0, 3).join(" | ")}${tautologyNote}`,
+        proving: newFailures,
+        tautologies,
       };
     }
 
@@ -1103,13 +1188,21 @@ async function runGates({
 
   // the tests must actually demonstrate the change
   const proof = await checkTestsProveTheChange({
-    worktree, base, sourceChanged, gates, baseline, onLog,
+    worktree, base, sourceChanged, gates, baseline, onLog, testChanged,
   });
   if (proof?.gate) failures.push(proof);
   const proofDetail = proof?.ok ? proof.detail : null;
   if (proofDetail) notes.push(`proof: ${proofDetail}`);
 
-  return { failures, changed, notes, commandResults: results, proofDetail };
+  return {
+    failures,
+    changed,
+    notes,
+    commandResults: results,
+    proofDetail,
+    proofProving: proof?.proving ?? [],
+    proofTautologies: proof?.tautologies ?? [],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1678,6 +1771,7 @@ function removedGuards(diffText) {
  */
 async function runIndependentReview({
   item, itemId, worktree, base, head, ctx, briefDir, log, prefix = "review",
+  proving = [], tautologies = [],
 }) {
   log("  spawning independent reviewer");
   const reviewer = await spawnAgent(agentName(prefix, itemId), worktree, ctx.parent);
@@ -1690,6 +1784,15 @@ async function runIndependentReview({
     HEAD_SHA: head,
     DIFF_FILE: path.join(briefDir, `${prefix}.diff`),
     REMOVED_GUARDS: "(none found)",
+    // The assertions that fail without the change, and the ones that pass on
+    // both sides. The reviewer is the only part of the harness that can say
+    // whether every behaviour the item names is covered by one of them.
+    PROVING_ASSERTIONS: proving.length
+      ? proving.map((n) => `- ${n}`).join("\n")
+      : "(none - no assertion failed without the change; the proof gate would have rejected the item)",
+    TAUTOLOGY_ASSERTIONS: tautologies.length
+      ? tautologies.map((n) => `- ${n}`).join("\n")
+      : "(none - every assertion in the item's test file fails without the change)",
   };
   // The reviewer may not be able to run shell commands in this environment, so
   // the orchestrator writes the diff out for it to read.
@@ -1971,8 +2074,10 @@ async function proveAndReview({ result, ctx, baseSha, log, prefix }) {
   const changed = (await git(["diff", "--name-only", baseSha], worktree)).stdout
     .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   const sourceChanged = changed.filter((f) => /(^|\/)src\//.test(f));
+  const testChanged = changed.filter((f) => TEST_FILE_RE.test(f));
   const proof = await checkTestsProveTheChange({
     worktree, base: baseSha, sourceChanged, gates: ctx.gates, baseline: ctx.baseline, onLog: log,
+    testChanged,
   });
   if (proof?.gate) {
     return { ok: false, reason: `${proof.gate}: ${proof.detail}` };
@@ -1985,6 +2090,8 @@ async function proveAndReview({ result, ctx, baseSha, log, prefix }) {
   const { verdict } = await runIndependentReview({
     item: ctx.item, itemId: result.itemId, worktree, base: baseSha, head,
     ctx, briefDir, log, prefix,
+    proving: proof?.proving ?? [],
+    tautologies: proof?.tautologies ?? [],
   });
   if (verdict.verdict !== "PASS") {
     return {
@@ -2443,6 +2550,8 @@ async function runItem(item, ctx) {
     // independent review
     const { verdict, agent: reviewerAddress } = await runIndependentReview({
       item, itemId, worktree, base, head, ctx, briefDir, log,
+      proving: gateResult.proofProving ?? [],
+      tautologies: gateResult.proofTautologies ?? [],
     });
 
     if (verdict.verdict !== "PASS") {
@@ -3014,6 +3123,8 @@ export {
   parseChecklist,
   slug,
   collectFailures,
+  collectPasses,
+  tautologiesIn,
   patchSignature,
   removedGuards,
   applyItemOutcome,

@@ -50,6 +50,18 @@ demo an independent reviewer passed a test whose assertion was true by construct
 (it ran *after* a repair function that had already fixed what it checked). The
 mechanical gate catches that class of problem without judgement calls.
 
+The gate answers one question — *does the suite fail without the change?* — which is
+a single signal for a whole test file. An item that names three behaviours can
+satisfy it with one failing assertion while the other two are covered by assertions
+that were already true before the change. So the gate also reports **which**
+assertions fail without the change, and **which assertions in the item's own test
+file pass on both sides**. The latter are tautologies: they may be regression
+guards, but they cannot demonstrate the change. Both lists go to the independent
+reviewer, which has to map every behaviour the item names onto a failing
+assertion. P0.7 is the case that forced this: two of its three settings were
+"proved" by assertions that passed on the old code too, because the pair of
+memories they used was classified `unrelated` rather than `contradiction`.
+
 ## Why the orchestrator owns the checklist
 
 If every worker flipped its own checkbox, every item branch would edit the same lines

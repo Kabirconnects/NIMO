@@ -34,8 +34,12 @@ touch, and S0 is what creates one.
       that runs `pnpm run test` passes without checking anything. `packages/memory`
       has the repo's one working convention: plain `tsx scripts/<name>-test.ts`
       files, wired into a `test:all` script. Give these three packages the same
-      convention (no new dependency required), so that a `test` script runs real
-      checks and the other items in this plan can prove themselves with tests.
+      convention, so that a `test` script runs real checks and the other items in
+      this plan can prove themselves with tests. `apps/server` and
+      `packages/agents` already depend on `tsx`; `apps/web` does not — add it to
+      its `devDependencies` with the same spec as the other packages, because the
+      repo's Node floor (`>=20.9`) cannot run TypeScript on its own, and a tool a
+      package does not declare is not on its path.
       Extend each package's `tsconfig` so the typecheck also covers the test files
       — `packages/memory` had the same blind spot and a test with a type error
       passed `typecheck` and only crashed at runtime.

@@ -23,6 +23,12 @@ other worktrees. Stay strictly inside your worktree.
 4. Re-run the gate commands and paste the real output. Never claim a pass you did not see.
    If a command cannot run at all (the Bash classifier may be unavailable), say so and
    stop retrying — the orchestrator runs the gates itself.
+   If a command comes back as **not recognized**, the tool is not available to that
+   package: check the package's own dependencies before changing what the script
+   calls. A script that points at a tool the package does not depend on fails for
+   every user of that package, not just in this worktree.
+   If a command cannot find a file you created, check that the file was actually
+   written and that the path in the script matches it exactly.
 5. Do not edit the checklist or any evidence log. Do not commit.
 6. The worktree may already contain your previous attempt's changes. Keep them if they are
    right, replace them if they caused a failure.

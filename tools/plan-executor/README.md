@@ -131,7 +131,9 @@ These are not hypothetical - each one broke a real run before it was fixed.
   the item. The harness installs first and, if pnpm's build-script policy blocks
   a native dependency, allow-lists it in the worktree - then restores the file,
   because an environment fix is not the worker's work and must not enter the
-  commit.
+  commit. The install is frozen by default; if the item legitimately adds a
+  dependency, the lockfile is out of date and pnpm refuses - so the harness
+  retries without the freeze, and records that the lockfile changed.
 - **A fresh agent is not ready when `hc run` returns.** Sending the brief during
   the boot window means the prompt is dropped, and the turn looks like it
   finished instantly with no output. The harness waits for the UI to reach a

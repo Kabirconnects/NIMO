@@ -506,10 +506,28 @@ async function restoreHarnessPatches(stateDir, worktree, log) {
  * them out of the item's commit.
  */
 async function installDeps(worktree, log, stateDir) {
-  const cmd = "pnpm install --frozen-lockfile --prefer-offline";
-  const run = () => execCmd(cmd, { cwd: worktree, timeout: 1_800_000 });
+  // `--frozen-lockfile` is the default: a stale lockfile is a real problem and
+  // should be caught. But an item may legitimately add a dependency (the S0
+  // prerequisite in the security plan does), and then the lockfile *must*
+  // change. Retry without the freeze only for that specific error, and report
+  // it so the lockfile change is visible in the notes and the review diff.
+  let frozen = true;
+  const run = () =>
+    execCmd(
+      `pnpm install ${frozen ? "--frozen-lockfile " : ""}--prefer-offline`,
+      { cwd: worktree, timeout: 1_800_000 },
+    );
   let r = await run();
-  if (r.code === 0) return { ok: true, patched: [] };
+  if (
+    r.code !== 0 &&
+    /ERR_PNPM_OUTDATED_LOCKFILE|frozen-lockfile/i.test(`${r.stdout}\n${r.stderr}`)
+  ) {
+    log("    the lockfile is out of date (the item adds a dependency) - updating it");
+    frozen = false;
+    r = await run();
+  }
+  const lockfileUpdated = !frozen;
+  if (r.code === 0) return { ok: true, patched: [], lockfileUpdated };
   const output = `${r.stdout}\n${r.stderr}`;
 
   // First try letting the package build. If its build script fails (no local
@@ -520,7 +538,7 @@ async function installDeps(worktree, log, stateDir) {
     log("    install blocked by pnpm's build policy - allowing the build and retrying");
     if (stateDir) recordHarnessPatch(stateDir, worktree, patchedFile);
     r = await run();
-    if (r.code === 0) return { ok: true, patched: [patchedFile] };
+    if (r.code === 0) return { ok: true, patched: [patchedFile], lockfileUpdated };
   }
 
   // The build itself failed: skip the build script instead.
@@ -528,7 +546,8 @@ async function installDeps(worktree, log, stateDir) {
   patchedFile =
     allowBuildsInWorktree(worktree, retryOutput, "false") ??
     patchedFile ??
-    allowBuildsInWorktree(worktree, output, "false");  if (!patchedFile) return { ok: false, output, patched: [] };
+    allowBuildsInWorktree(worktree, output, "false");
+  if (!patchedFile) return { ok: false, output, patched: [], lockfileUpdated };
   log("    the build script failed - skipping it and retrying");
   if (stateDir) recordHarnessPatch(stateDir, worktree, patchedFile);
   r = await run();
@@ -536,6 +555,7 @@ async function installDeps(worktree, log, stateDir) {
     ok: r.code === 0,
     output: `${r.stdout}\n${r.stderr}`,
     patched: [patchedFile],
+    lockfileUpdated,
   };
 }
 
@@ -649,6 +669,9 @@ async function runGates({
       detail: `the worktree cannot be installed, so no command can be trusted:\n${install.output.split(/\r?\n/).slice(-8).join("\n")}`,
     });
     return { failures, changed: allFiles, notes, commandResults: [] };
+  }
+  if (install.lockfileUpdated) {
+    notes.push("pnpm-lock.yaml was updated to install a new dependency (must be justified)");
   }
 
   const results = [];

@@ -219,5 +219,42 @@ export function isRetrievable(node: MemoryNode, ownerId: string, policy: MemoryP
   if (node.validUntil && node.validUntil.getTime() <= nowTime) {
     return false;
   }
+  if (policy.maxEvidenceAgeDays !== undefined && policy.maxEvidenceAgeDays > 0 && node.evidence && node.evidence.length > 0) {
+    // The age is measured from the NEWEST piece of evidence: a memory is only
+    // stale when every observation behind it is stale.
+    //
+    // `observedAt` is typed `Date`, but the value a stored node carries is
+    // whatever `JSON.parse` produced - an ISO string - because the evidence is
+    // persisted as JSON text (`memory_policies`/`memories.evidence`) and read
+    // back with a plain parse. `Number("2026-11-15T...")` is NaN, so a check
+    // written against `Number(...)` can never fire: the limit is configured,
+    // the evidence is old, and the memory is still retrievable. Parse the
+    // value that is actually there, and tolerate all three shapes (a Date, a
+    // number of epoch milliseconds, an ISO string) so a caller holding a
+    // freshly built node and a caller holding a stored one agree.
+    let newestTime = 0;
+    for (const ev of node.evidence) {
+      const raw: unknown = ev.observedAt;
+      const t =
+        raw instanceof Date
+          ? raw.getTime()
+          : typeof raw === "number"
+            ? raw
+            : typeof raw === "string"
+              ? Date.parse(raw)
+              : NaN;
+      if (Number.isFinite(t) && t > newestTime) {
+        newestTime = t;
+      }
+    }
+    // No usable timestamp at all: the age is unknown, not zero. A memory
+    // without evidence dates is not filtered out - there is nothing to judge.
+    if (newestTime > 0) {
+      const ageDays = (nowTime - newestTime) / (1000 * 60 * 60 * 24);
+      if (ageDays > policy.maxEvidenceAgeDays) {
+        return false;
+      }
+    }
+  }
   return true;
 }

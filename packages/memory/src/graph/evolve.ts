@@ -19,6 +19,7 @@ import {
   insertEdge,
   insertRevision,
   recordAudit,
+  getPolicy,
 } from "../storage/db.js";
 import { assessConflict, contradictionScore as scoreConflict } from "./conflict.js";
 
@@ -60,6 +61,14 @@ export function contradictionScore(a: MemoryNode, b: MemoryNode): number {
 
 export function evolve(input: EvolutionInput): EvolutionOutput {
   const { ownerId, memoryId, cause, newEvidenceNode } = input;
+
+  const policy = getPolicy(ownerId);
+  if (
+    !policy.allowAutomaticEvolution &&
+    (cause === "new_evidence" || cause === "consolidation")
+  ) {
+    return { changed: false };
+  }
 
   const target = findMemory(memoryId, ownerId);
   if (!target) {

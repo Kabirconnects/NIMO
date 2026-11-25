@@ -15,7 +15,7 @@
 
 import type { MemoryNode } from "../domain/memory.types.js";
 import type { MemoryEdge } from "../domain/memory-edge.types.js";
-import { edgesFrom, findMemory, getDb } from "../storage/db.js";
+import { edgesFrom, findMemory, getDb, getPolicy } from "../storage/db.js";
 import { isRetrievable } from "../governance/policy.js";
 
 export interface PlanStep {
@@ -47,8 +47,9 @@ export interface Plan {
  * @param maxDepth - max BFS depth (default 4, matches activation cap)
  */
 export function planFromGoal(ownerId: string, goalId: string, maxDepth = 4): Plan | null {
+  const policy = getPolicy(ownerId);
   const goal = findMemory(goalId, ownerId);
-  if (!goal || !isRetrievable(goal, ownerId)) return null;
+  if (!goal || !isRetrievable(goal, ownerId, policy)) return null;
 
   const depth = Math.min(maxDepth, 4);
 
@@ -82,7 +83,7 @@ export function planFromGoal(ownerId: string, goalId: string, maxDepth = 4): Pla
         if (!PREREQ_RELATIONS.has(relation)) continue;
         if (visited.has(fromId)) continue;
         const node = findMemory(fromId, ownerId);
-        if (node && isRetrievable(node, ownerId)) {
+        if (node && isRetrievable(node, ownerId, policy)) {
           visited.set(fromId, { node, depth: d + 1 });
           next.push(fromId);
         }
@@ -95,7 +96,7 @@ export function planFromGoal(ownerId: string, goalId: string, maxDepth = 4): Pla
       for (const e of edges) {
         if (["depends_on", "requires"].includes(e.relation) && !visited.has(e.toMemoryId)) {
           const node = findMemory(e.toMemoryId, ownerId);
-          if (node && isRetrievable(node, ownerId)) {
+          if (node && isRetrievable(node, ownerId, policy)) {
             visited.set(e.toMemoryId, { node, depth: d + 1 });
             next.push(e.toMemoryId);
           }

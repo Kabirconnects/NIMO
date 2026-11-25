@@ -13,7 +13,7 @@
 import type { RetrievedMemory } from "../domain/service.types.js";
 import type { MemoryNode } from "../domain/memory.types.js";
 import { isRetrievable } from "../governance/policy.js";
-import { edgesFrom, findMemory } from "../storage/db.js";
+import { edgesFrom, findMemory, getPolicy } from "../storage/db.js";
 import { computeFinalScore } from "./rank.js";
 
 const LAMBDA = 0.5; // neighbor influence
@@ -26,6 +26,7 @@ export function activate(
 ): RetrievedMemory[] {
   if (seeds.length === 0) return [];
   const hops = Math.min(maxHops, 4);
+  const policy = getPolicy(ownerId);
 
   const activation = new Map<string, number>(); // memoryId -> A(v)
   const matchedBy = new Map<string, RetrievedMemory["matchedBy"]>();
@@ -50,7 +51,17 @@ export function activate(
       for (const edge of edgesFrom(id, ownerId)) {
         const peerId = edge.toMemoryId;
         const peer = nodes.get(peerId) ?? findMemory(peerId, ownerId);
-        if (!peer || !isRetrievable(peer, ownerId)) continue;
+        if (!peer || !isRetrievable(peer, ownerId, policy)) continue;
+
+        // Confidence floor — auto activation only.
+        // A neighbour reached from a seed is auto-activated: when the owner's policy sets a confidence floor,
+        // a neighbour whose confidence is below maxMemoryConfidenceForAutoActivation is not activated.
+        if (
+          policy.maxMemoryConfidenceForAutoActivation !== undefined &&
+          (peer.confidence ?? 0.5) < policy.maxMemoryConfidenceForAutoActivation
+        ) {
+          continue;
+        }
 
         if (!nodes.has(peerId)) {
           nodes.set(peerId, peer);

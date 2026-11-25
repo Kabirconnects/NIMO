@@ -15,7 +15,7 @@
 import type { RecallInput, RecallResult } from "../domain/service.types.js";
 import { recall } from "../retrieval/search.js";
 import { embedText, cosSim } from "../retrieval/embed.js";
-import { listActiveMemoriesByImportance } from "../storage/db.js";
+import { getPolicy, listActiveMemoriesByImportance } from "../storage/db.js";
 import { isRetrievable } from "../governance/policy.js";
 
 export interface BenchmarkQuestion {
@@ -61,12 +61,13 @@ export interface BenchmarkSummary {
 function recallVectorOnly(ownerId: string, query: string, limit: number): { ids: string[]; scores: Map<string, number> } {
   // Same candidate pool ordering as production recall so the comparison is
   // about retrieval signals, not about who scanned more rows.
+  const policy = getPolicy(ownerId);
   const actives = listActiveMemoriesByImportance(ownerId, 5000);
   const queryEmb = embedText(query);
   const scored: { id: string; score: number }[] = [];
 
   for (const node of actives) {
-    if (!isRetrievable(node, ownerId)) continue;
+    if (!isRetrievable(node, ownerId, policy)) continue;
     const emb = node.embedding && node.embedding.length > 0
       ? node.embedding
       : embedText([node.content, node.summary, ...node.keywords].join(" "));

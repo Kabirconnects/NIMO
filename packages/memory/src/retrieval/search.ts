@@ -17,6 +17,7 @@ import {
   listActiveSkills,
   isFtsAvailable,
   searchFts,
+  getPolicy,
 } from "../storage/db.js";
 import { activate } from "./activate.js";
 import { bm25Score, embedText, cosSim, stemsOverlap, isCommonWord } from "./embed.js";
@@ -76,6 +77,7 @@ export function recall(input: RecallInput): RecallResult {
   // Human-like flowing pool: one continuous stream of active memories, no
   // session buckets. Load the most important memories first so an old stable
   // fact cannot be cut off by a wall of fresh filler.
+  const policy = getPolicy(input.ownerId);
   const totalActive = countActiveMemories(input.ownerId);
   const actives = listActiveMemoriesByImportance(input.ownerId, SCAN_CAP);
   const poolTruncated = totalActive > actives.length;
@@ -105,7 +107,7 @@ export function recall(input: RecallInput): RecallResult {
   const ftsSet = new Set(ftsIds);
 
   for (const node of actives) {
-    if (!isRetrievable(node, input.ownerId)) continue;
+    if (!isRetrievable(node, input.ownerId, policy)) continue;
     if (input.memoryTypes?.length && !input.memoryTypes.includes(node.type)) continue;
 
     const haystack = [node.content, node.summary, ...node.concepts, ...node.keywords, ...node.tags].join(" ");
@@ -179,7 +181,7 @@ export function recall(input: RecallInput): RecallResult {
   const scored: RetrievedMemory[] = [];
   for (const id of fusedIds) {
     const node = byId.get(id);
-    if (!node || !isRetrievable(node, input.ownerId)) continue;
+    if (!node || !isRetrievable(node, input.ownerId, policy)) continue;
 
     const haystack = [node.content, node.summary, ...node.concepts, ...node.keywords, ...node.tags]
       .join(" ")

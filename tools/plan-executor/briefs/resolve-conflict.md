@@ -35,6 +35,14 @@ The exact paths are listed above.
    - If they changed the same line, combine them: both behaviours usually have
      to hold at once. A route that must be authenticated *and* rate-limited
      needs both middlewares, not one of them.
+   - **A `package.json` conflict is usually one command line.** Two items each
+     added their own test script to the same `scripts` entry, so both sides
+     changed the same long string. The resolved value must contain **both**
+     scripts, each exactly once, and the file must still be valid JSON. A
+     command list joined with `&&` keeps every part; keep the order the two
+     sides used. Check the file parses (`node -e "require('./package.json')"`)
+     before you stage it - a JSON file with a stray comma fails every command
+     in the package, and the failure looks like a bug in the item.
    - Keep the style of the surrounding file.
    - Do not weaken a security property to make a conflict go away.
 3. Remove every conflict marker. `git grep -n '^<<<<<<<\|^=======\|^>>>>>>>'`

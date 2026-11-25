@@ -1133,7 +1133,15 @@ async function mergeItem(result, ctx) {
     `- ${new Date().toISOString().slice(0, 10)} — ${item.id}: ${item.text.slice(0, 90)} ` +
     `(${summary}; ${diffStat} file(s) changed; independent review: PASS` +
     `${partial ? `; still partial: ${result.remaining ?? "gap not stated"}` : ""}).`;
-  if (evidenceIdx >= 0) lines.splice(evidenceIdx + 1, 0, entry);
+  if (evidenceIdx >= 0) {
+    // One authoritative line per item: a re-run replaces that item's old line
+    // instead of piling duplicates on top of it. The history lives in git.
+    const existing = lines.findIndex(
+      (l, i) => i > evidenceIdx && l.includes(`— ${item.id}:`),
+    );
+    if (existing >= 0) lines.splice(existing, 1);
+    lines.splice(evidenceIdx + 1, 0, entry);
+  }
   fs.writeFileSync(checklistAbs, lines.join("\n"), "utf8");
   await git(["add", checklistRel], REPO_ROOT);
   await git(

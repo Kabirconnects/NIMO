@@ -450,6 +450,37 @@ function proofCommandsFor(sourceChanged, gates, root) {
  * "before" behaviour for them to contradict.
  */
 /**
+ * Find an item's line in the checklist file again.
+ *
+ * The item was parsed before the work happened, and by the time it is written
+ * back the file may have been reworded. So the exact first line is tried
+ * first; if that is gone, a prefix of it is used - and when the prefix matches
+ * more than one line, the one nearest the line the parser saw wins. A loose
+ * "first line that contains these 60 characters" match would otherwise let
+ * one item's text be written onto another item's line.
+ */
+function findItemLine(lines, item) {
+  const head = String(item.head ?? "").trim();
+  if (!head) return -1;
+  const exact = lines.findIndex(
+    (l) => l.replace(/^\s*-\s*\[( |x|~)\]\s+/, "").trim() === head,
+  );
+  if (exact >= 0) return exact;
+
+  const prefix = head.slice(0, 60);
+  const candidates = [];
+  lines.forEach((l, i) => {
+    if (l.includes(prefix)) candidates.push(i);
+  });
+  if (!candidates.length) return -1;
+  if (candidates.length === 1) return candidates[0];
+  const anchor = Number(item.line) || 0;
+  return candidates.reduce((best, i) =>
+    Math.abs(i + 1 - anchor) < Math.abs(best + 1 - anchor) ? i : best,
+  );
+}
+
+/**
  * The last line of a checklist item's block.
  *
  * An item is its first line plus the indented lines below it. When the item's
@@ -676,6 +707,14 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
     // Put the worker's source back, byte for byte.
     for (const f of files) fs.copyFileSync(f.dest, f.abs);
     fs.rmSync(backup, { recursive: true, force: true, maxRetries: 5 });
+    // `git checkout base -- <file>` moved the INDEX as well as the file, so
+    // restoring only the file leaves the index holding the old source. Every
+    // later `git diff` then reports the source as changed against the index,
+    // and the worktree looks dirty in a way that has nothing to do with the
+    // worker. Put the index back where the restored files are.
+    for (const f of files) {
+      await git(["add", "--", f.rel], worktree);
+    }
     const afterDiff = (await git(["diff", base, "--", ...sourceChanged], worktree)).stdout;
     if (afterDiff !== beforeDiff) {
       onLog?.(`    proof: WARNING - the source files were not restored exactly`);
@@ -1026,9 +1065,20 @@ async function agentStatus(address) {
 }
 
 /** hc names are limited to 32 chars of [a-z0-9-_]. */
+/**
+ * The name of a worker for one attempt of one item.
+ *
+ * The name is capped at 32 characters, and the attempt number has to survive
+ * that cap: a truncated name loses the suffix, so every attempt of a long
+ * item id ends up with the SAME name - and a name that is already taken makes
+ * the spawn fall back to a random suffix, which is unreadable in the log. The
+ * attempt number goes at the end, and the item id is shortened to make room.
+ */
 function agentName(prefix, itemId, attempt = null) {
   const suffix = attempt === null ? "" : `-a${attempt}`;
-  return `${prefix}-${itemId}${suffix}`.slice(0, 32).replace(/-+$/, "");
+  const room = 32 - prefix.length - suffix.length - 1;
+  const stem = String(itemId).slice(0, Math.max(8, room)).replace(/-+$/, "");
+  return `${prefix}-${stem}${suffix}`.slice(0, 32).replace(/-+$/, "");
 }
 
 /**
@@ -1222,8 +1272,15 @@ function screenSincePrompt(screen, marker) {
  * that the agent finished its work: the agent's "working" state can flicker, and
  * a fresh agent can look idle before it has even picked up the prompt.
  */
-async function sendAndWait(address, text, { timeout = 1800, done = null, blockedHint = null } = {}) {
-  await hc(["send", address, text, "--json"]);
+async function sendAndWait(address, text, { timeout = 1800, done = null, blockedHint = null, onLog = null } = {}) {
+  const started = Date.now();
+  const sent = await hc(["send", address, text, "--json"]);
+  // A send that fails is not a turn: the agent never sees the brief, and the
+  // harness would sit here until the timeout and then judge an empty screen.
+  // Say so at once.
+  if (sent.code !== 0) {
+    return `SEND FAILED (exit ${sent.code}): ${sent.stdout}${sent.stderr}`;
+  }
   const deadline = Date.now() + timeout * 1000;
   // A freshly spawned agent can report "idle" for a moment before it starts.
   const startDeadline = Date.now() + 30_000;
@@ -1242,7 +1299,16 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
 
     const screen = await readScreen(address);
     const current = screenSincePrompt(screen, marker);
-    if (done && hasTrailer(current, done)) return current;
+    if (done && hasTrailer(current, done)) {
+      // A turn that ends in a couple of seconds did not do the work. The
+      // gates will say so anyway, but the log should not let it pass as a
+      // normal attempt.
+      const seconds = Math.round((Date.now() - started) / 1000);
+      if (seconds < 20) {
+        onLog?.(`    note: the turn ended after ${seconds}s - that is too fast to be work`);
+      }
+      return current;
+    }
 
     // A modal does not always show up as a "blocked" state: the plan-approval
     // prompt leaves the agent idle and waiting, so the worker would sit there
@@ -1435,7 +1501,7 @@ async function runIndependentReview({
   const reviewScreen = await sendAndWait(
     reviewer.address,
     `Read the review brief at "${reviewFile}" and execute it exactly. The diff to review is at "${reviewVars.DIFF_FILE}". Review the diff for item ${itemId}.`,
-    { timeout: ctx.args.turnTimeout, done: /VERDICT:\s*(PASS|FAIL)/i },
+    { timeout: ctx.args.turnTimeout, done: /VERDICT:\s*(PASS|FAIL)/i, onLog: log },
   );
   const verdict = parseReport(reviewScreen);
   await hc(["kill", reviewer.address]);
@@ -1522,6 +1588,7 @@ async function resolveRebaseConflict({ result, ctx, baseSha, log }) {
     {
       timeout: ctx.args.turnTimeout,
       done: /RESOLVED:\s*(yes|no)/i,
+      onLog: log,
       blockedHint:
         "Stop running shell commands - they are blocked in this environment. " +
         "Remove the conflict markers from the file with your editor so that BOTH " +
@@ -1916,6 +1983,7 @@ async function runItem(item, ctx) {
     const screen = await sendAndWait(implementer.address, pointer, {
       timeout: args.turnTimeout,
       done: /STATUS:\s*(done|blocked)/i,
+      onLog: log,
     });
     const report = parseReport(screen);
 
@@ -1947,6 +2015,26 @@ async function runItem(item, ctx) {
     lastFailures = gateResult.failures;
     if (lastFailures.length) {
       log(`  gates failed: ${lastFailures.map((f) => f.gate).join(", ")}`);
+      // Keep what the worker said. A gate failure is only useful if you can
+      // see what the worker believed it had done - otherwise the next attempt
+      // repeats the same mistake and nobody can tell why. The screen is kept
+      // on disk too: it is the only record of the turn, and the agent is gone
+      // by the time the run finishes.
+      const said = [
+        report.status ? `status: ${report.status}` : "no status trailer",
+        report.itemState ? `item state: ${report.itemState}` : null,
+        report.remaining ? `remaining: ${report.remaining}` : null,
+        report.changed ? `changed: ${report.changed}` : null,
+        report.tests ? `tests: ${report.tests}` : null,
+      ]
+        .filter(Boolean)
+        .join("; ");
+      log(`  the worker said: ${said}`);
+      try {
+        fs.writeFileSync(path.join(briefDir, `attempt-${attempt}.screen.txt`), screen, "utf8");
+      } catch {
+        /* the screen is a nicety, not a requirement */
+      }
       continue;
     }
     log("  gates passed");
@@ -2152,7 +2240,7 @@ async function mergeItem(result, ctx) {
 
   // the orchestrator owns the checklist and the evidence log
   const lines = fs.readFileSync(checklistAbs, "utf8").split(/\r?\n/);
-  const idx = lines.findIndex((l) => l.includes(item.head.slice(0, 60)));
+  const idx = findItemLine(lines, item);
   const partial = result.itemState === "partial";
   if (idx >= 0) {
     applyItemOutcome(lines, idx, {
@@ -2171,7 +2259,12 @@ async function mergeItem(result, ctx) {
     ? `; merged after a conflict with an earlier item (${result.conflictResolution})`
     : "";
   const entry =
-    `- ${new Date().toISOString().slice(0, 10)} — ${item.id}: ${item.text.slice(0, 90)} ` +
+    // The evidence line quotes what the checklist now says - not what it said
+    // before the work. An item that stated a gap ("... is not implemented") and
+    // had that gap closed would otherwise be filed under the old wording, and
+    // the log would read as if the gap were still open.
+    `- ${new Date().toISOString().slice(0, 10)} — ${item.id}: ` +
+    `${String(result.itemText ?? item.text).replace(/\s+/g, " ").trim().slice(0, 90)} ` +
     `(${summary}; ${diffStat} file(s) changed${proofText}${conflictText}; independent review: PASS` +
     `${partial ? `; still partial: ${result.remaining ?? "gap not stated"}` : ""}).`;
   if (evidenceIdx >= 0) {
@@ -2413,4 +2506,6 @@ export {
   patchSignature,
   removedGuards,
   applyItemOutcome,
+  findItemLine,
+  agentName,
 };

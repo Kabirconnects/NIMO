@@ -15,6 +15,8 @@ import {
   slug,
   removedGuards,
   applyItemOutcome,
+  findItemLine,
+  agentName,
 } from "./plan-executor.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -223,6 +225,62 @@ check(
     remaining: null,
   })[2],
   "- [x] Working memory: no dedicated type; approximated by `ephemeral` retention.",
+);
+
+// ---------------------------------------------------------------------------
+// findItemLine: the item's own line, not a look-alike
+// ---------------------------------------------------------------------------
+
+const locateLines = [
+  "- [x] Working memory has its own type.",
+  "- [ ] Working memory: no dedicated type; approximated by `ephemeral` retention.",
+];
+
+check(
+  "an item is found by its exact first line",
+  findItemLine(locateLines, {
+    head: "Working memory: no dedicated type; approximated by `ephemeral` retention.",
+    line: 2,
+  }),
+  1,
+);
+
+check(
+  "a reworded item is found by the prefix, nearest the line it was parsed from",
+  findItemLine(locateLines, {
+    head: "Working memory: no dedicated type; approximated by `ephemeral` retention.",
+    line: 2,
+  }),
+  1,
+);
+
+check(
+  "an item that is not in the file is reported as missing",
+  findItemLine(locateLines, { head: "Something else entirely.", line: 9 }),
+  -1,
+);
+
+// ---------------------------------------------------------------------------
+// agentName: every attempt of an item needs its own name
+// ---------------------------------------------------------------------------
+
+check(
+  "two attempts of the same item get different names",
+  agentName("plan", "p0-7-policy-settings-that-still-have-no--01", 2) ===
+    agentName("plan", "p0-7-policy-settings-that-still-have-no--01", 3),
+  false,
+);
+
+check(
+  "the attempt number survives the 32 character cap",
+  agentName("plan", "p0-7-policy-settings-that-still-have-no--01", 3).endsWith("-a3"),
+  true,
+);
+
+check(
+  "a worker name never exceeds 32 characters",
+  agentName("resolve", "p0-7-policy-settings-that-still-have-no--01", 3).length <= 32,
+  true,
 );
 
 // ---------------------------------------------------------------------------

@@ -174,6 +174,18 @@ demo took five runs instead of one.
 | 10 | **reviewer verdict parsed as "E"** | `last()` returned the whole regex match, so `?.[1]` indexed into the string `"VERDICT: PASS"` | the helper returns the capture group |
 | 11 | a turn "finished" instantly with no output | an agent looks idle for a moment before it starts | the report trailer is the completion signal; an idle agent only ends the turn once it has been working |
 | 12 | review failed even when the reviewer was right | all of the above | fixed together; the demo then passed review and merged |
+| 13 | **the worker never saw the failures it was handed** | the terminal scrolls, so the *previous* turn's `STATUS: done` trailer was still on screen when the next prompt was sent; the harness matched it, thought the new turn was over, and ran the gates while the worker was still working | only the screen after the echoed prompt is read, so a trailer from an earlier turn can never be mistaken for this turn's answer |
+
+Bug 13 is the one that mattered. Its symptom was subtle: the retries simply came
+back too fast (1m39s and 52s for attempts that needed minutes), and the identical
+error survived all three attempts. The worker was being asked to fix a type error
+and was never actually given the time to read the failure list. Nothing in the
+output said "the worker was ignored" — the harness looked like it was working
+exactly as designed.
+
+It was found by reading the **timings** in the ledger rather than the output: two
+attempts under two minutes on a 447-line test file is not plausible, and that
+inconsistency was the only signal.
 
 The lesson generalises: **a harness that is never run is a hypothesis.** Five of these
 bugs were invisible to reading the code and obvious only when an agent actually used it.

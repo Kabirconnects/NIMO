@@ -138,3 +138,36 @@
 {"ts":"2026-11-25T05:08:27.350Z","msg":"  reusing the existing worktree from a previous run"}
 {"ts":"2026-11-25T05:08:29.635Z","msg":"  implementer: t1x"}
 {"ts":"2026-11-25T05:08:29.636Z","msg":"  attempt 1: briefing implementer"}
+{"ts":"2026-11-25T05:12:44.880Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T05:12:45.804Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T05:12:48.366Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T05:12:50.393Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T05:12:54.203Z","msg":"    proof: re-running the tests against the pre-change source"}
+{"ts":"2026-11-25T05:12:58.099Z","msg":"    proof: the tests fail without the change (compile new failure(s))"}
+{"ts":"2026-11-25T05:12:58.169Z","msg":"  gates failed: command, command"}
+{"ts":"2026-11-25T05:12:58.171Z","msg":"  attempt 2: briefing implementer"}
+{"ts":"2026-11-25T05:14:37.974Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T05:14:38.807Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T05:14:41.297Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T05:14:43.149Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T05:14:46.925Z","msg":"    proof: re-running the tests against the pre-change source"}
+{"ts":"2026-11-25T05:14:50.937Z","msg":"    proof: the tests fail without the change (compile new failure(s))"}
+{"ts":"2026-11-25T05:14:50.999Z","msg":"  gates failed: command, command"}
+{"ts":"2026-11-25T05:14:51.001Z","msg":"  attempt 3: briefing implementer"}
+{"ts":"2026-11-25T05:15:43.709Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T05:15:44.502Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T05:15:46.980Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T05:15:48.806Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T05:15:52.809Z","msg":"    proof: re-running the tests against the pre-change source"}
+{"ts":"2026-11-25T05:15:56.675Z","msg":"    proof: the tests fail without the change (compile new failure(s))"}
+{"ts":"2026-11-25T05:15:56.725Z","msg":"  gates failed: command, command"}
+{"ts":"2026-11-25T05:15:56.909Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T05:15:56.910Z","msg":"c-temporal-memory-03: blocked, left in place for inspection"}
+{"ts":"2026-11-25T05:15:56.911Z","msg":"\nsummary: 1 merged, 1 blocked"}
+{"ts":"2026-11-25T05:15:56.911Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}
+{"ts":"2026-11-25T05:18:12.166Z","msg":"\n=== c-temporal-memory-03 (partial) C. Temporal Memory ==="}
+{"ts":"2026-11-25T05:18:12.173Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03"}
+{"ts":"2026-11-25T05:18:12.173Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory"}
+{"ts":"2026-11-25T05:18:12.668Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T05:18:15.005Z","msg":"  implementer: t1y"}
+{"ts":"2026-11-25T05:18:15.007Z","msg":"  attempt 1: briefing implementer"}

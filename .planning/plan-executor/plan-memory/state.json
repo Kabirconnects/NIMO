@@ -50,6 +50,10 @@
       "failures": [
         {
           "gate": "command",
+          "detail": "`pnpm --filter @workspace/memory run typecheck` exited 2 and no baseline covers it. Output tail:\nscripts/temporal-test.ts(95,42): error TS2345: Argument of type '{ ownerId: string; role: \"user\"; content: string; }' is not assignable to parameter of type 'IngestExperienceInput'.\n  Property 'type' is missing in type '{ ownerId: string; role: \"user\"; content: string; }' but required in type 'IngestExperienceInput'.\nC:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory:\n[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @workspace/memory@0.0.1 typecheck: `tsc --noEmit -p tsconfig.typecheck.json`\nExit status 2\n\n$ tsc --noEmit -p tsconfig.typecheck.json"
+        },
+        {
+          "gate": "command",
           "detail": "`pnpm --filter @workspace/memory run test:all` exited 1 and no baseline covers it. Output tail:\n     ^\n\nSqliteError: NOT NULL constraint failed: experiences.type\n    at captureExperience (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\storage\\db.ts:445:6)\n    at capture (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\ingestion\\capture.ts:18:10)\n    at ingest (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\ingestion\\ingest.ts:31:22)\n    at Object.remember (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\service.ts:98:12)\n    at <anonymous> (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\scripts\\temporal-test.ts:95:33) {\n  code: 'SQLITE_CONSTRAINT_NOTNULL'\n}\n\nNode.js v24.19.0"
         }
       ],

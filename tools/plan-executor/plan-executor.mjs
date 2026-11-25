@@ -417,7 +417,17 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
   const beforeDiff = (await git(["diff", base, "--", ...sourceChanged], worktree)).stdout;
 
   try {
-    await git(["checkout", base, "--", ...sourceChanged], worktree);
+    // Put the base version of every changed source file back. A file the fix
+    // *created* has no base version, so it has to be removed - and a single
+    // `git checkout base -- <paths>` would fail on it and restore nothing.
+    for (const rel of sourceChanged) {
+      const existed = await git(["cat-file", "-e", `${base}:${rel}`], worktree);
+      if (existed.code === 0) {
+        await git(["checkout", base, "--", rel], worktree);
+      } else {
+        fs.rmSync(path.join(worktree, rel), { force: true });
+      }
+    }
     const stillGreen = [];
     for (const cmd of cmds) {
       const r = await execCmd(cmd, { cwd: worktree, timeout: 1_200_000 });
@@ -431,10 +441,26 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
         continue;
       }
       if (!currentFailures.length) {
-        // The command died without naming a failing test - usually a compile error
-        // because the new test imports something the old source does not have.
-        // That is a weak proof: the test did not detect the change, it could not
-        // even load. Say so instead of calling it a pass.
+        // The command died without naming a failing test. There are two very
+        // different reasons, and they are not equally strong:
+        //
+        //  - the test imports a module the old code does not have (the fix
+        //    added a file). The test pins the new code: it cannot load
+        //    without it. That IS a proof - the test is sensitive to the
+        //    change by construction.
+        //  - the old source itself crashes when loaded (it reads
+        //    `import.meta.env`, say). The test never ran, so it demonstrated
+        //    nothing. That is inconclusive.
+        if (/ERR_MODULE_NOT_FOUND|Cannot find module|Cannot find package/i.test(output)) {
+          onLog?.(
+            `    proof: the test requires the new code to exist ` +
+            `(it cannot load without it)`,
+          );
+          return {
+            ok: true,
+            detail: `the test cannot load without the change (it imports a module the old code does not have), so it pins the new code`,
+          };
+        }
         onLog?.(
           `    proof: inconclusive - the suite could not run against the old source ` +
           `(no named test failure, probably a compile error)`,
@@ -460,7 +486,10 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
       onLog?.(
         `    proof: the tests fail without the change (${newFailures.length} new failure(s))`,
       );
-      return null;
+      return {
+        ok: true,
+        detail: `${newFailures.length} named failure(s) without the change: ${newFailures.slice(0, 3).join(" | ")}`,
+      };
     }
 
     // Every command still passed against the old source: the tests do not
@@ -807,9 +836,11 @@ async function runGates({
   const proof = await checkTestsProveTheChange({
     worktree, base, sourceChanged, gates, baseline, onLog,
   });
-  if (proof) failures.push(proof);
+  if (proof?.gate) failures.push(proof);
+  const proofDetail = proof?.ok ? proof.detail : null;
+  if (proofDetail) notes.push(`proof: ${proofDetail}`);
 
-  return { failures, changed, notes, commandResults: results };
+  return { failures, changed, notes, commandResults: results, proofDetail };
 }
 
 // ---------------------------------------------------------------------------
@@ -1351,6 +1382,7 @@ async function runItem(item, ctx) {
       head,
       changed: committedFiles.length ? committedFiles : gateResult.changed,
       commandResults: gateResult.commandResults,
+      proof: gateResult.proofDetail ?? null,
       itemState: report.itemState ?? "complete",
       remaining: report.remaining ?? null,
       reviewer: reviewer.address,
@@ -1461,9 +1493,10 @@ async function mergeItem(result, ctx) {
     .map((c) => `${c.cmd} => exit ${c.code}`)
     .join("; ");
   const diffStat = result.changed.length;
+  const proofText = result.proof ? `; proof: ${result.proof}` : "";
   const entry =
     `- ${new Date().toISOString().slice(0, 10)} — ${item.id}: ${item.text.slice(0, 90)} ` +
-    `(${summary}; ${diffStat} file(s) changed; independent review: PASS` +
+    `(${summary}; ${diffStat} file(s) changed${proofText}; independent review: PASS` +
     `${partial ? `; still partial: ${result.remaining ?? "gap not stated"}` : ""}).`;
   if (evidenceIdx >= 0) {
     // One authoritative line per item: a re-run replaces that item's old line

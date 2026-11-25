@@ -85,7 +85,11 @@ touch, and S0 is what creates one.
       `apps/web/src/features/auth/components/protected-route.tsx:28` redirects on
       `if (!user)`; `isError` is never checked. A server hiccup therefore signs the user out.
       Distinguish "not signed in" from "could not check", and only redirect on the
-      former.
+      former. The web package's tests run under plain Node (no bundler), where
+      `import.meta.env` is undefined — so a test cannot import a module that pulls in
+      `@/lib/api-client`. Put the "signed in" vs "could not check" decision in its own
+      module that imports nothing from the app, use it from the hook and the route
+      guard, and test that module.
 
 ## S6 — Web: logout leaves a stale session behind on error
 

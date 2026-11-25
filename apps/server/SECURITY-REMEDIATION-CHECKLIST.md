@@ -172,6 +172,39 @@ touch, and S0 is what creates one.
       throws a clear configuration error when the production URL is missing; use it
       from `api-client.ts` and test that module.
 
+## S9 — Memory: the policy fix weakened the retrieval filter
+
+- [ ] While loading the owner's policy, S3 also changed `isRetrievable`
+      (`packages/memory/src/governance/policy.ts:207`), and it weakened two checks that
+      have nothing to do with the policy:
+      - the **owner** check was replaced — `node.ownerId !== ownerId → false` became
+        `node.visibility === "private" && node.ownerId !== ownerId → false`, so a node
+        that belongs to **another** owner and is marked `workspace` or `shared` now
+        passes the filter. The old comment said why the check exists: "Defence in
+        depth: repositories also scope by ownerId in the query."
+      - the **status** check was replaced — `node.status !== "active" → false` became
+        `status === "deleted" || "superseded" → false`, so a `candidate` or an
+        `archived` memory now passes. The graph paths
+        (`packages/memory/src/retrieval/activate.ts:52`,
+        `packages/memory/src/graph/planner.ts:84,97`) fetch a node by id with
+        `findMemory`, which filters by owner but **not** by status, so `isRetrievable`
+        is the only thing keeping an archived memory out of a result.
+      - the function now takes a `policy` parameter it never reads.
+      Retrieval must return a node only when it belongs to the owner asking for it
+      **and** its status is `active`. A node that is meant to be visible to other
+      owners is a different feature: it needs the retrieval paths to share the node on
+      purpose, not a weaker filter. No parameter may be left behind unread.
+      Testing this: the memory package's tests are plain `tsx scripts/<name>-test.ts`
+      runners (`packages/memory/package.json`, `test:all`). Put the test in its own
+      `scripts/<name>-test.ts` file **and add it to the `test:all` script** — a test
+      that nothing runs is not a test. The test needs no database: `isRetrievable`
+      takes a `MemoryNode`, so build the node in the test (a partial object cast to
+      `MemoryNode` is fine — the type is in
+      `packages/memory/src/domain/memory.types.ts`) and assert that a node of another
+      owner is not retrievable even when its `visibility` is `workspace` or `shared`,
+      that an `active` node of the owner is retrievable, and that a `candidate` and an
+      `archived` node of the owner are not.
+
 ---
 
 ## Evidence Log

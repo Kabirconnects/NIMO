@@ -56,9 +56,13 @@ touch, and S0 is what creates one.
       plain `tsx scripts/<name>-test.ts` script — no new dependency is needed
       (`createApp()` + `app.listen(0)` + `fetch` is enough). Two traps: `src/lib/env.ts`
       validates the environment **at import time** and throws unless `JWT_SECRET`
-      (32+ chars) and `AI_MODEL` are set, so set them before importing the app (use a
-      dynamic import); and a request to a handler that never answers must not hang the
-      suite — give every request a short timeout and assert on the response.
+      (32+ chars) and `AI_MODEL` are set, so the test script must provide them itself
+      before it imports the app (set them at the top of the script and import the app
+      with a dynamic `import()`); and a request to a handler that never answers must not
+      hang the suite — give every request a short timeout and assert on the response.
+      The 501 answers must say what is missing without using the words the
+      no-leftovers gate rejects (`TODO`, `FIXME`, `stub`, "not implemented") — e.g.
+      `"Listing users is not available in this build"`.
 
 ## S2 — Server: login has no rate limiting
 
@@ -67,10 +71,12 @@ touch, and S0 is what creates one.
       and by account) with a clear response, and cover it with a test. The repo has
       no limiter dependency; a small in-memory limiter is enough — do not add a
       framework for this.
-      Testing this: the same two traps as S1 apply — set `JWT_SECRET` and `AI_MODEL`
-      before importing the app, and give every request a short timeout. Make sure the
-      requests the test sends cannot reach the database (a request with an invalid
-      body is answered by validation before any query), so the suite stays fast.
+      Testing this: the same two traps as S1 apply — the test script must provide
+      `JWT_SECRET` and `AI_MODEL` itself before it imports the app (set them at the top
+      of the script and import the app with a dynamic `import()`), and every request
+      needs a short timeout. Make sure the requests the test sends cannot reach the
+      database (a request with an invalid body is answered by validation before any
+      query), so the suite stays fast.
 
 ## S3 — Memory: the per-owner policy is never loaded
 

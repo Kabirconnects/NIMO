@@ -1190,6 +1190,35 @@ function renderBrief(template, vars) {
   return template.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
 }
 
+/**
+ * Seed a worktree's ignored env files from the committed examples.
+ *
+ * The server validates its environment at import time, so a test that imports
+ * the app cannot even load without `JWT_SECRET` and `AI_MODEL`. The repo keeps
+ * the values in `.env.example` (committed) and the real ones in `.env`
+ * (ignored), and a fresh worktree has neither - every route test died with
+ * "Invalid environment configuration". Copying the example in gives the test
+ * an environment, and because `.env` is gitignored it can never end up in the
+ * item's commit.
+ */
+function seedEnvFiles(worktree, scopeRels, log) {
+  const seeded = [];
+  for (const rel of scopeRels ?? []) {
+    const dir = path.join(worktree, rel);
+    const example = path.join(dir, ".env.example");
+    const target = path.join(dir, ".env");
+    if (!fs.existsSync(example) || fs.existsSync(target)) continue;
+    try {
+      fs.copyFileSync(example, target);
+      seeded.push(`${rel}/.env`);
+    } catch {
+      /* the gate will report it if it matters */
+    }
+  }
+  if (seeded.length) log(`    seeded env files from the examples: ${seeded.join(", ")}`);
+  return seeded;
+}
+
 async function runItem(item, ctx) {
   const {
     args, base, packageRoot, checklistRel, checklistAbs, gates, state, log,
@@ -1218,6 +1247,10 @@ async function runItem(item, ctx) {
     state.items[itemId] = { status: "blocked", reason: "stale worktree conflicts with the current base" };
     return { itemId, status: "blocked" };
   }
+
+  // The environment the tests need (the example files are committed, the real
+  // ones are ignored, so a worktree has neither).
+  seedEnvFiles(worktree, ctx.scopeRels, log);
 
   // dependencies for the worktree (pnpm store makes this quick)
   let patchedFiles = [];

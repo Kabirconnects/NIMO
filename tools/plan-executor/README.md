@@ -33,16 +33,22 @@ agent gets the last word on judgement calls.
 
 | Gate | What it enforces |
 |---|---|
-| scope | changed files stay inside the item's package; the checklist is never edited by a worker; file count is bounded |
+| scope | changed files (including untracked ones) stay inside the item's package; the checklist is never edited by a worker; file count is bounded |
 | leftovers | no `TODO`, `FIXME`, `XXX`, `HACK`, `not implemented`, `unimplemented`, `@ts-ignore`, `@ts-expect-error`, `stub` on added lines |
 | tests | a source change without a test change is rejected |
 | commands | typecheck + lint + the package test suite run **by the orchestrator** in the worktree |
 | baseline | pre-existing failures are baselined, so only **new** failures block an item |
+| proof | when source changed, the new tests are re-run against the pre-change source — if they still pass, they prove nothing and the item is rejected |
 | review | a second, independent agent reviews the diff and must answer `VERDICT: PASS` |
 
 A failed gate sends the exact failures back to the same implementer for another
 attempt. After `--attempts` failures the item is marked blocked, its worktree is kept
 for inspection, and nothing is merged.
+
+The **proof** gate exists because the reviewer is a model, not a proof: in the first
+demo an independent reviewer passed a test whose assertion was true by construction
+(it ran *after* a repair function that had already fixed what it checked). The
+mechanical gate catches that class of problem without judgement calls.
 
 ## Why the orchestrator owns the checklist
 
@@ -82,12 +88,11 @@ node tools/plan-executor/plan-executor.mjs \
 | `--only <id,id>` | run only these item ids |
 | `--max-items <n>` | stop after n items |
 | `--gates "<cmd;cmd>"` | override the gate commands |
-| `--turn-timeout <sec>` | max wait per agent turn (default 1800) |
-| `--record-baseline` | record currently-failing tests and exit |
-| `--include-partial` | also work on `[~]` items (default: only `[ ]`) |
-| `--drop-blocked` | delete blocked items' worktrees instead of keeping them |
-| `--dry-run` | parse and print, change nothing |
 | `--parent <t>` | herdr terminal to parent the workers to (default: auto) |
+| `--plan-id <id>` | name of the state directory (default: derived from the checklist) |
+
+By default every open item is worked on — both `[ ]` and `[~]`. Use `--open-only`
+to skip the partial ones.
 
 ## Item ids
 

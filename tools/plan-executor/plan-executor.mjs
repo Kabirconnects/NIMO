@@ -930,6 +930,7 @@ async function runItem(item, ctx) {
   log(`  implementer: ${implementer.address}`);
 
   let lastFailures = [];
+  let lastBlockReason = null;
   let result = { status: "blocked" };
 
   for (let attempt = 1; attempt <= args.attempts; attempt++) {
@@ -966,8 +967,18 @@ async function runItem(item, ctx) {
     const report = parseReport(screen);
 
     if (report.status === "blocked") {
-      lastFailures = [{ gate: "worker", detail: `worker reported blocked: ${report.blocked}` }];
-      log(`  worker reported blocked: ${report.blocked}`);
+      const reason = report.blocked ?? "(no reason given)";
+      // The same blocker twice means the worker needs a human decision, not
+      // another attempt. Stop and report it instead of burning the attempts.
+      if (lastBlockReason && lastBlockReason === reason) {
+        log(`  worker is blocked for the same reason again: ${reason}`);
+        log(`  -> this item needs a human decision; not retrying`);
+        lastFailures = [{ gate: "worker", detail: `worker reported blocked: ${reason}` }];
+        break;
+      }
+      lastBlockReason = reason;
+      lastFailures = [{ gate: "worker", detail: `worker reported blocked: ${reason}` }];
+      log(`  worker reported blocked: ${reason}`);
       continue;
     }
 
@@ -1063,6 +1074,7 @@ async function runItem(item, ctx) {
     state.items[itemId] = {
       status: "blocked",
       failures: lastFailures,
+      needsHuman: lastBlockReason ? lastBlockReason : undefined,
       worktree,
       branch,
     };

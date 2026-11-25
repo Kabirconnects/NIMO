@@ -48,10 +48,17 @@ touch, and S0 is what creates one.
 
 - [ ] `GET /`, `GET /:id`, `PATCH /:id` and `DELETE /:id` under the user module are
       mounted without `authMiddleware` (`apps/server/src/modules/user/users.routes.ts:16,25,26,27`).
-      Today the handlers are `// TODO` stubs (`users.controller.ts:14,25,179,188`), so
+      Today the handlers are `// TODO` stubs (`users.controller.ts:16,27,181,190`), so
       nothing leaks — but a request to them hangs forever instead of answering. Apply
       the same authentication the other protected modules use, and make the stub
       handlers answer with a clear error instead of hanging.
+      Testing this: the server package has no test framework, and the convention is a
+      plain `tsx scripts/<name>-test.ts` script — no new dependency is needed
+      (`createApp()` + `app.listen(0)` + `fetch` is enough). Two traps: `src/lib/env.ts`
+      validates the environment **at import time** and throws unless `JWT_SECRET`
+      (32+ chars) and `AI_MODEL` are set, so set them before importing the app (use a
+      dynamic import); and a request to a handler that never answers must not hang the
+      suite — give every request a short timeout and assert on the response.
 
 ## S2 — Server: login has no rate limiting
 
@@ -60,10 +67,14 @@ touch, and S0 is what creates one.
       and by account) with a clear response, and cover it with a test. The repo has
       no limiter dependency; a small in-memory limiter is enough — do not add a
       framework for this.
+      Testing this: the same two traps as S1 apply — set `JWT_SECRET` and `AI_MODEL`
+      before importing the app, and give every request a short timeout. Make sure the
+      requests the test sends cannot reach the database (a request with an invalid
+      body is answered by validation before any query), so the suite stays fast.
 
 ## S3 — Memory: the per-owner policy is never loaded
 
-- [ ] `DEFAULT_POLICY` is hardcoded at `packages/memory/src/service.ts:57,116,294,400`,
+- [ ] `DEFAULT_POLICY` is hardcoded at `packages/memory/src/service.ts:57,116,306,412`,
       `packages/memory/src/ingestion/ingest.ts:48,68`,
       `packages/memory/src/workers/ingestion.worker.ts:34` and
       `packages/memory/src/tools.ts:252,289`. `packages/memory/src/governance/policy.ts:148`

@@ -924,9 +924,25 @@ async function makeWorktree(root, branch, base, stateDir, log) {
   return { reused: true };
 }
 
-async function removeWorktree(root, branch) {
-  await git(["worktree", "remove", "--force", root], REPO_ROOT, 120_000);
+async function removeWorktree(root, branch, log) {
+  // A worktree holds a full node_modules - tens of thousands of files - so
+  // the removal takes minutes on Windows. git gives up when it times out and
+  // leaves the directory behind (deregistered, but still on disk).
+  const r = await git(["worktree", "remove", "--force", root], REPO_ROOT, 600_000);
+  if (r.code !== 0 || fs.existsSync(root)) {
+    await git(["worktree", "prune"], REPO_ROOT, 120_000);
+    try {
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    } catch {
+      /* reported below */
+    }
+  }
   await git(["branch", "-D", branch], REPO_ROOT, 60_000);
+  if (fs.existsSync(root)) {
+    log?.(`  warning: could not fully remove the worktree ${root}`);
+    return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1137,7 +1153,7 @@ async function runItem(item, ctx) {
       worktree,
       branch,
     };
-    if (!args.keepBlocked) await removeWorktree(worktree, branch);
+    if (!args.keepBlocked) await removeWorktree(worktree, branch, log);
     return { itemId, status: "blocked", failures: lastFailures };
   }
 
@@ -1251,7 +1267,7 @@ async function mergeItem(result, ctx) {
     120_000,
   );
 
-  await removeWorktree(result.worktree, result.branch);
+  await removeWorktree(result.worktree, result.branch, log);
   log(`  merged and recorded: ${item.id}`);
   return { ok: true };
 }

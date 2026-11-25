@@ -63,6 +63,10 @@ the item is blocked.
 End your report with exactly:
 
 ```
-RESOLVED: yes
+RESOLVED: <yes or no>
 CONFLICTS: <one short line per conflict: what it was, and how you combined the two sides>
 ```
+
+The angle brackets are placeholders - replace each one with the real value.
+Write `RESOLVED: yes` (and not the placeholder) when every conflict is resolved
+and the rebase is finished.

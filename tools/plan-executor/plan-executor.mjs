@@ -1252,7 +1252,12 @@ async function unstick(address) {
 /** Is the report trailer visible near the end of the screen? */
 function hasTrailer(screen, regex) {
   const lines = screen.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  return regex.test(lines.slice(-25).join("\n"));
+  // The window is small on purpose. The brief the worker reads contains the
+  // report format - and when the worker reads the brief, that text is ON
+  // SCREEN. A wide window finds "STATUS: done" in the brief's own example and
+  // ends the turn while the worker is still working. The real trailer is at
+  // the very end of the turn, under the TUI's own chrome.
+  return regex.test(lines.slice(-10).join("\n"));
 }
 
 /**
@@ -1297,6 +1302,7 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
   let resent = false;
   let unsticks = 0;
   let blockedCommands = 0;
+  let workingTrailer = 0;
   for (;;) {
     const status = await agentStatus(address);
     const state = status?.status?.state ?? status?.state ?? "unknown";
@@ -1305,6 +1311,21 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
     const screen = await readScreen(address);
     const current = screenSincePrompt(screen, marker);
     if (done && hasTrailer(current, done)) {
+      // A trailer while the agent is still working is not a trailer: it is the
+      // brief's own example, or text the agent is quoting. An agent that is
+      // still working has not finished its report, so the turn has not ended.
+      if (state === "working") {
+        // Bound the wait: if the agent's status never leaves "working" (a
+        // herdr quirk we have seen), the trailer is all we will ever get.
+        workingTrailer++;
+        if (workingTrailer < 20) {
+          await sleep(2000);
+          continue;
+        }
+        onLog?.(
+          `    note: the agent still reports "working" - taking the trailer it showed`,
+        );
+      }
       // A turn that ends in a couple of seconds did not do the work. The
       // gates will say so anyway, but the log should not let it pass as a
       // normal attempt.

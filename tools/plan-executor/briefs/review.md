@@ -62,16 +62,19 @@ End your message with exactly these lines, and nothing after them:
 
 ```
 ITEM: {{ITEM_ID}}
-VERDICT: PASS
+VERDICT: <PASS or FAIL>
 ```
 
 or
 
 ```
 ITEM: {{ITEM_ID}}
-VERDICT: FAIL
+VERDICT: <FAIL>
 REASONS: <numbered, one line each: path:line - what is wrong - what it should be>
 ```
+
+The angle brackets are placeholders - replace each one with the real value.
+Write `VERDICT: PASS` (and not the placeholder) when the change is good.
 
 `PASS` means: complete, tested, no leftovers, no correctness bug you can point at.
 If you have any concrete doubt, say FAIL and give the reason — the implementer gets to fix it.

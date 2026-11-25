@@ -80,12 +80,15 @@ Finish your message with exactly these lines, and nothing after them:
 
 ```
 ITEM: {{ITEM_ID}}
-STATUS: done
-ITEM_STATE: complete | partial
+STATUS: <done or blocked>
+ITEM_STATE: <complete or partial>
 ITEM_TEXT: <the item's wording after your change - one line>
 CHANGED: <comma-separated list of the files you changed>
 TESTS: <one line per gate command with its exit code, e.g. "typecheck => exit 0">
 ```
+
+The angle brackets are placeholders - replace each one with the real value.
+Write `STATUS: done` (and not the placeholder) when the work is finished.
 
 `ITEM_STATE: complete` means the item is fully satisfied now.
 `ITEM_STATE: partial` means you closed part of the gap but something still stands in the
@@ -105,7 +108,7 @@ If you cannot finish the item without breaking a rule, end with:
 
 ```
 ITEM: {{ITEM_ID}}
-STATUS: blocked
+STATUS: <blocked>
 BLOCKED: <the precise reason, and what you tried>
 ```
 

@@ -91,12 +91,15 @@ Finish your message with exactly these lines, and nothing after them:
 
 ```
 ITEM: {{ITEM_ID}}
-STATUS: done
-ITEM_STATE: complete | partial
+STATUS: <done or blocked>
+ITEM_STATE: <complete or partial>
 ITEM_TEXT: <the item's wording after your change - one line>
 CHANGED: <comma-separated list of the files you changed>
 TESTS: <one line per gate command with its exit code>
 ```
+
+The angle brackets are placeholders - replace each one with the real value.
+Write `STATUS: done` (and not the placeholder) when the work is finished.
 
 If the item is only partly satisfied, add `REMAINING: <what still stands in the way>`.
 
@@ -109,6 +112,6 @@ If it still cannot be done without breaking a rule, end with:
 
 ```
 ITEM: {{ITEM_ID}}
-STATUS: blocked
+STATUS: <blocked>
 BLOCKED: <the precise reason, and what you tried>
 ```

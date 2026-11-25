@@ -17,6 +17,8 @@ import {
   applyItemOutcome,
   findItemLine,
   agentName,
+  parseReport,
+  hasTrailer,
 } from "./plan-executor.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));

@@ -73,7 +73,7 @@ touch, and S0 is what creates one.
 
 ## S4 — Agents: command reuse collides on the joined command line
 
-- [ ] `packages/agents/src/tools/shared/process.ts:589` builds
+- [x] `packages/agents/src/tools/shared/process.ts:589` builds
       `commandLine = argv.join(" ")`, matched at `:697-700`, so `["run","a b"]` and
       `["run","a","b"]` are treated as the same process. Reusing a process by that
       string can attach to the wrong one. Key the process by the argv array itself,
@@ -109,6 +109,7 @@ touch, and S0 is what creates one.
 ---
 
 ## Evidence Log
+- 2026-11-25 — s4-agents-command-reuse-collides-on-the--01: `packages/agents/src/tools/shared/process.ts:589` builds `commandLine = argv.join(" ")`, m (pnpm --filter @workspace/server run typecheck => exit 0; pnpm --filter @workspace/server run lint => exit 0; pnpm --filter @workspace/server run test:all => exit 0; pnpm --filter web run typecheck => exit 0; pnpm --filter web run lint => exit 0; pnpm --filter web run test => exit 0; pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; pnpm --filter @workspace/agents run typecheck => exit 0; pnpm --filter @workspace/agents run lint => exit 0; pnpm --filter @workspace/agents run test => exit 0; 2 file(s) changed; independent review: PASS).
 - 2026-11-25 — s0-prerequisite-the-packages-under-this--01: `apps/server`, `apps/web` and `packages/agents` currently have **no automated tests at all (pnpm --filter @workspace/server run typecheck => exit 0; pnpm --filter @workspace/server run lint => exit 0; pnpm --filter @workspace/server run test => exit 0; pnpm --filter web run typecheck => exit 0; pnpm --filter web run lint => exit 0; pnpm --filter web run test => exit 0; pnpm --filter @workspace/memory run typecheck => exit 0; pnpm --filter @workspace/memory run lint => exit 0; pnpm --filter @workspace/memory run test:all => exit 0; pnpm --filter @workspace/agents run typecheck => exit 0; pnpm --filter @workspace/agents run lint => exit 0; pnpm --filter @workspace/agents run test => exit 0; 9 file(s) changed; independent review: PASS).
 
 _Evidence is written here by the plan executor, not by workers. Each entry records the

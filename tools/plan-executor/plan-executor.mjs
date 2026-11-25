@@ -449,6 +449,31 @@ function proofCommandsFor(sourceChanged, gates, root) {
  * Items that only add tests (no source change) are exempt: there is no
  * "before" behaviour for them to contradict.
  */
+/**
+ * The names a module exports.
+ *
+ * Used by the proof: when the old source is put back and the test dies with
+ * "X is not a function" or "the module does not provide an export named X",
+ * the question is whether X is something the CHANGE added. If it is, the test
+ * cannot run without the change - which is a proof, not an accident.
+ */
+function exportedNames(text) {
+  const names = new Set();
+  if (!text) return names;
+  for (const m of text.matchAll(
+    /export\s+(?:declare\s+)?(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/g,
+  )) {
+    names.add(m[1]);
+  }
+  for (const m of text.matchAll(/export\s*\{([^}]*)\}/g)) {
+    for (const part of m[1].split(",")) {
+      const name = part.trim().replace(/^type\s+/, "").split(/\s+as\s+/).pop()?.trim();
+      if (name) names.add(name);
+    }
+  }
+  return names;
+}
+
 async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, baseline, onLog }) {
   const { cmds, uncovered, testCmds } = proofCommandsFor(sourceChanged, gates, worktree);
   if (!sourceChanged.length || !testCmds.length) return null;
@@ -476,6 +501,25 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
     return { rel, abs, dest };
   });
   const beforeDiff = (await git(["diff", base, "--", ...sourceChanged], worktree)).stdout;
+
+  // The exports the CHANGE added. A test that uses one of them cannot run
+  // against the old source - which is exactly what a proving test looks like,
+  // and the difference between "the test pins the new code" and "the old code
+  // crashed on its own".
+  const addedExports = new Set();
+  for (const rel of sourceChanged) {
+    let newText = "";
+    try {
+      newText = fs.readFileSync(path.join(worktree, rel), "utf8");
+    } catch {
+      /* unreadable - nothing to compare */
+    }
+    const oldRes = await git(["show", `${base}:${rel}`], worktree);
+    const oldNames = exportedNames(oldRes.code === 0 ? oldRes.stdout : "");
+    for (const name of exportedNames(newText)) {
+      if (!oldNames.has(name)) addedExports.add(name);
+    }
+  }
 
   try {
     // Put the base version of every changed source file back. A file the fix
@@ -520,6 +564,23 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
           return {
             ok: true,
             detail: `the test cannot load without the change (it imports a module the old code does not have), so it pins the new code`,
+          };
+        }
+        // The test uses something the change ADDED - a new function, a new
+        // export - so against the old source it cannot even run. That is a
+        // proof: the test cannot pass without the change.
+        const missingExport =
+          /does not provide an export named ['"]?([A-Za-z_$][\w$]*)/i.exec(output);
+        const notAFunction = /([A-Za-z_$][\w$]*) is not a function/i.exec(output);
+        const missing = missingExport?.[1] ?? notAFunction?.[1];
+        if (missing && addedExports.has(missing)) {
+          onLog?.(
+            `    proof: the test requires \`${missing}\`, which the change adds ` +
+              `(the old code does not have it)`,
+          );
+          return {
+            ok: true,
+            detail: `the test uses \`${missing}\`, which the change adds, so it cannot run against the old code - it pins the new code`,
           };
         }
         onLog?.(

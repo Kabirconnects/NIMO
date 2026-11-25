@@ -531,6 +531,35 @@ function agentName(prefix, itemId) {
   return `${prefix}-${itemId}`.slice(0, 32).replace(/-+$/, "");
 }
 
+/**
+ * Wait until the agent's UI is actually at a prompt.
+ *
+ * `hc run --bg` returns as soon as the terminal exists, but the agent still has
+ * to boot. A prompt sent during that window is either dropped or answered
+ * before the agent is ready, and the turn looks like it finished immediately
+ * with no output - which is how a reviewer ends up reporting "NO VERDICT".
+ */
+async function waitForAgentReady(address, { timeout = 120_000 } = {}) {
+  const deadline = Date.now() + timeout;
+  let dismissed = 0;
+  while (Date.now() < deadline) {
+    const status = await agentStatus(address);
+    const state = status?.status?.state ?? status?.state ?? "unknown";
+    const screen = await readScreen(address);
+    if (/Enter to continue/i.test(screen) && dismissed < 3) {
+      dismissed++;
+      await hc(["keys", address, "enter"]);
+      await sleep(1000);
+      continue;
+    }
+    if (state !== "working" && /❯|auto mode on|\bWaiting for your input\b/i.test(screen)) {
+      return true;
+    }
+    await sleep(2000);
+  }
+  return false;
+}
+
 async function spawnAgent(name, cwd, parent) {
   // The harness owns these names. A previous run may still hold one, so reclaim
   // it before spawning rather than dying on "name_taken".
@@ -571,6 +600,7 @@ async function spawnAgent(name, cwd, parent) {
   if (!parsed?.address) {
     throw new Error(`could not spawn agent ${name}: ${r.stdout}${r.stderr}`);
   }
+  await waitForAgentReady(parsed.address);
   return parsed;
 }
 
@@ -592,48 +622,78 @@ async function unstick(address) {
   return null;
 }
 
-/** Send a prompt and wait for that turn to end. Returns the screen text afterwards. */
-async function sendAndWait(address, text, { timeout = 1800 } = {}) {
+/** Is the report trailer visible near the end of the screen? */
+function hasTrailer(screen, regex) {
+  const lines = screen.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  return regex.test(lines.slice(-25).join("\n"));
+}
+
+/**
+ * Send a prompt and wait for that turn to end. Returns the screen text afterwards.
+ *
+ * `done` is a regex for the report trailer. The trailer is the reliable signal
+ * that the agent finished its work: the agent's "working" state can flicker, and
+ * a fresh agent can look idle before it has even picked up the prompt.
+ */
+async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) {
   await hc(["send", address, text, "--json"]);
   const deadline = Date.now() + timeout * 1000;
+  // A freshly spawned agent can report "idle" for a moment before it starts.
+  const startDeadline = Date.now() + 30_000;
+  let sawWorking = false;
   let unsticks = 0;
   for (;;) {
     const status = await agentStatus(address);
     const state = status?.status?.state ?? status?.state ?? "unknown";
-    if (state !== "working") {
-      if (state === "blocked" && unsticks < 2) {
-        unsticks++;
-        const what = await unstick(address);
-        if (what) {
-          await sleep(1500);
-          continue;
-        }
+    if (state === "working") sawWorking = true;
+
+    const screen = await readScreen(address);
+    if (done && hasTrailer(screen, done)) return screen;
+
+    if (state === "blocked" && unsticks < 2) {
+      unsticks++;
+      const what = await unstick(address);
+      if (what) {
+        await sleep(1500);
+        continue;
       }
-      break;
     }
-    if (Date.now() > deadline) break;
+
+    if (state !== "working" && (sawWorking || Date.now() > startDeadline)) {
+      // The turn is over. Re-read once, in case the final message was still
+      // being painted when the state flipped.
+      await sleep(1500);
+      const again = await readScreen(address);
+      if (done && hasTrailer(again, done)) return again;
+      return again;
+    }
+
+    if (Date.now() > deadline) return await readScreen(address);
     await sleep(3000);
   }
-  return readScreen(address);
 }
 
 function parseReport(screen) {
   const lines = screen.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const tail = lines.slice(-120);
   const joined = tail.join("\n");
+  // Return the capture group of the last match, so "VERDICT: PASS" yields
+  // "PASS" and not the second character of the matched text.
   const last = (re) => {
     const matches = [...joined.matchAll(re)];
-    return matches.length ? matches[matches.length - 1][0] : null;
+    if (!matches.length) return null;
+    const m = matches[matches.length - 1];
+    return m.length > 1 ? m[1] : m[0];
   };
   return {
-    status: last(/STATUS:\s*(done|blocked)/gi)?.[1]?.toLowerCase() ?? null,
-    itemState: last(/ITEM_STATE:\s*(complete|partial)/gi)?.[1]?.toLowerCase() ?? null,
-    remaining: last(/REMAINING:\s*(.+)/gi)?.[1]?.trim() ?? null,
-    verdict: last(/VERDICT:\s*(PASS|FAIL)/gi)?.[1]?.toUpperCase() ?? null,
-    changed: last(/CHANGED:\s*(.+)/gi)?.[1]?.trim() ?? null,
-    tests: last(/TESTS:\s*(.+)/gi)?.[1]?.trim() ?? null,
-    reasons: last(/REASONS:\s*([\s\S]+)/gi)?.[1]?.trim() ?? null,
-    blocked: last(/BLOCKED:\s*(.+)/gi)?.[1]?.trim() ?? null,
+    status: last(/STATUS:\s*(done|blocked)/gi)?.toLowerCase() ?? null,
+    itemState: last(/ITEM_STATE:\s*(complete|partial)/gi)?.toLowerCase() ?? null,
+    remaining: last(/REMAINING:\s*(.+)/gi)?.trim() ?? null,
+    verdict: last(/VERDICT:\s*(PASS|FAIL)/gi)?.toUpperCase() ?? null,
+    changed: last(/CHANGED:\s*(.+)/gi)?.trim() ?? null,
+    tests: last(/TESTS:\s*(.+)/gi)?.trim() ?? null,
+    reasons: last(/REASONS:\s*([\s\S]+)/gi)?.trim() ?? null,
+    blocked: last(/BLOCKED:\s*(.+)/gi)?.trim() ?? null,
     tail,
   };
 }
@@ -776,6 +836,7 @@ async function runItem(item, ctx) {
       `Work only inside ${worktree}.`;
     const screen = await sendAndWait(implementer.address, pointer, {
       timeout: args.turnTimeout,
+      done: /STATUS:\s*(done|blocked)/i,
     });
     const report = parseReport(screen);
 
@@ -836,7 +897,7 @@ async function runItem(item, ctx) {
     const reviewScreen = await sendAndWait(
       reviewer.address,
       `Read the review brief at "${reviewFile}" and execute it exactly. The diff to review is at "${reviewVars.DIFF_FILE}". Review the diff for item ${itemId}.`,
-      { timeout: args.turnTimeout },
+      { timeout: args.turnTimeout, done: /VERDICT:\s*(PASS|FAIL)/i },
     );
     const verdict = parseReport(reviewScreen);
     await hc(["kill", reviewer.address]);

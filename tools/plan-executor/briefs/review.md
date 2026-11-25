@@ -27,12 +27,12 @@ not the description of it.
 2. **Leftovers** — any `TODO`, `FIXME`, `XXX`, `HACK`, `not implemented`, `unimplemented`,
    `@ts-ignore`, `@ts-expect-error`, stub, placeholder body, empty catch, commented-out code,
    or "TODO: handle later" left in the added lines? That is an automatic FAIL.
-4. **Tests** — is there a test that would FAIL without this change and PASS with it? A test
+3. **Tests** — is there a test that would FAIL without this change and PASS with it? A test
    that asserts nothing meaningful, or no test at all for a source change, is a FAIL.
-5. **Correctness** — real bugs: wrong conditions, off-by-one, missing null/empty handling,
+4. **Correctness** — real bugs: wrong conditions, off-by-one, missing null/empty handling,
    unhandled error paths, incorrect async ordering, races, wrong SQL, resource leaks.
-6. **Regressions** — does this break existing behaviour or existing tests?
-7. **Scope** — does the change stay inside the item's scope, or does it wander?
+5. **Regressions** — does this break existing behaviour or existing tests?
+6. **Scope** — does the change stay inside the item's scope, or does it wander?
 
 ## Rules for you
 

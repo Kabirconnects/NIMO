@@ -21,12 +21,18 @@ repository: other agents work in other worktrees. Stay strictly inside your work
    output. Never claim a command passed that you did not see pass.
 5. **Stay in scope.** Change files only inside: {{ALLOWED_PATHS}}. Touch as few files as
    the item requires. Do not refactor unrelated code, do not reformat untouched files,
-   do not bump dependencies.
+   do not bump dependencies. **Leave no other files behind**: no notes, reports, scratch
+   files, `MEMORY.md`, `ITEM_COMPLETE.md`, or summaries of your own work anywhere in the
+   repository. The only files that change are the ones the item needs.
 6. **Do not edit the checklist** (`{{CHECKLIST_PATH}}`) or any evidence log. The
    orchestrator writes those. Editing them breaks the merge.
 7. **Do not commit.** Leave your changes in the working tree. The orchestrator commits.
 8. **Follow the repo's own rules.** Read `CLAUDE.md` and `AGENTS.md` at the repo root
    before you start; they define conventions you must match.
+9. **If a command will not run, stop retrying.** This environment may refuse to execute
+   shell commands (the Bash classifier can be unavailable). If that happens, say so in
+   your report and move on — the orchestrator runs the verification commands itself and
+   judges your work by the diff, not by your claim that it passes.
 
 ## Gate commands (run these in your worktree)
 

@@ -306,13 +306,21 @@ async function runGates({
 
   const diffRes = await git(["diff", "--name-only", base], worktree);
   const changed = diffRes.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  // Untracked files are invisible to `git diff` but would be swept into the
+  // commit by `git add -A`, so they must be part of every check.
+  const untrackedRes = await git(["ls-files", "--others", "--exclude-standard"], worktree);
+  const untracked = untrackedRes.stdout
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const allFiles = [...new Set([...changed, ...untracked])];
 
-  if (!changed.length) {
+  if (!allFiles.length) {
     failures.push({
       gate: "diff",
       detail: "the worktree contains no changes at all - the item was not implemented",
     });
-    return { failures, changed, notes };
+    return { failures, changed: allFiles, notes };
   }
 
   // scope: stay inside the package, never touch the checklist, bounded file count
@@ -321,38 +329,47 @@ async function runGates({
     "pnpm-workspace.yaml", "package.json", "pnpm-lock.yaml", "turbo.json",
     "tsconfig.json", ".npmrc",
   ]);
-  const outside = changed.filter(
+  const outside = allFiles.filter(
     (f) => !f.startsWith(pkgRel + "/") && f !== pkgRel && !ROOT_CONFIG_ALLOW.has(f),
   );
   if (outside.length) {
     failures.push({
       gate: "scope",
-      detail: `changed files outside ${pkgRel}: ${outside.join(", ")}`,
+      detail: `changed files outside ${pkgRel}: ${outside.join(", ")}. Remove stray files or move the change inside the package.`,
     });
   }
-  const rootConfigChanged = changed.filter((f) => ROOT_CONFIG_ALLOW.has(f));
+  const rootConfigChanged = allFiles.filter((f) => ROOT_CONFIG_ALLOW.has(f));
   if (rootConfigChanged.length) {
     notes.push(`shared root config changed: ${rootConfigChanged.join(", ")} (must be justified)`);
   }
-  if (changed.includes(checklistRel)) {
+  if (changed.includes(checklistRel) || untracked.includes(checklistRel)) {
     failures.push({
       gate: "scope",
       detail: `the checklist file ${checklistRel} was edited by the worker - the orchestrator owns that file`,
     });
   }
-  if (changed.length > 15) {
+  if (allFiles.length > 15) {
     failures.push({
       gate: "scope",
-      detail: `too many files changed (${changed.length}); the item should be narrow`,
+      detail: `too many files changed (${allFiles.length}); the item should be narrow`,
     });
   }
 
-  // leftovers on added lines only
+  // leftovers on added lines only, plus the whole content of new files
   const patch = (await git(["diff", "-U0", base], worktree)).stdout;
   const added = patch
     .split(/\r?\n/)
     .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
     .map((l) => l.slice(1));
+  for (const file of untracked) {
+    const abs = path.join(worktree, file);
+    try {
+      const text = fs.readFileSync(abs, "utf8");
+      added.push(...text.split(/\r?\n/));
+    } catch {
+      /* binary or unreadable - nothing to scan */
+    }
+  }
   for (const { label, re } of LEFTOVER_PATTERNS) {
     const hits = added.filter((l) => re.test(l));
     if (hits.length) {
@@ -364,8 +381,8 @@ async function runGates({
   }
 
   // tests must exist for source changes
-  const sourceChanged = changed.filter((f) => /(^|\/)src\//.test(f));
-  const testChanged = changed.filter((f) => TEST_FILE_RE.test(f));
+  const sourceChanged = allFiles.filter((f) => /(^|\/)src\//.test(f));
+  const testChanged = allFiles.filter((f) => TEST_FILE_RE.test(f));
   if (sourceChanged.length && !testChanged.length) {
     failures.push({
       gate: "tests",
@@ -436,15 +453,46 @@ function agentName(prefix, itemId) {
 }
 
 async function spawnAgent(name, cwd, parent) {
+  // The harness owns these names. A previous run may still hold one, so reclaim
+  // it before spawning rather than dying on "name_taken".
+  try {
+    const list = JSON.parse((await hc(["ls", "--json"])).stdout);
+    const clash = (list.terminals ?? []).find(
+      (t) => t.name === name && t.state === "live",
+    );
+    if (clash) {
+      await hc(["kill", clash.address]);
+      await sleep(500);
+    }
+  } catch {
+    /* listing is best-effort */
+  }
+
   const args = ["run", "--bg", "--json", "--no-notify", "--name", name, "--cwd", cwd];
   if (parent) args.push("--parent", parent);
   args.push("claude");
-  const r = await hc(args);
+  let r = await hc(args);
+  let parsed = null;
   try {
-    return JSON.parse(r.stdout);
+    parsed = JSON.parse(r.stdout);
   } catch {
+    /* handled below */
+  }
+  if (parsed?.error?.kind === "name_taken") {
+    // fall back to a unique name rather than failing the item
+    const unique = `${name.slice(0, 24)}-${Date.now().toString(36).slice(-5)}`.slice(0, 32);
+    args[args.indexOf("--name") + 1] = unique;
+    r = await hc(args);
+    try {
+      parsed = JSON.parse(r.stdout);
+    } catch {
+      parsed = null;
+    }
+  }
+  if (!parsed?.address) {
     throw new Error(`could not spawn agent ${name}: ${r.stdout}${r.stderr}`);
   }
+  return parsed;
 }
 
 async function readScreen(address) {
@@ -499,12 +547,12 @@ function parseReport(screen) {
     return matches.length ? matches[matches.length - 1][0] : null;
   };
   return {
-    status: last(/STATUS:\s*(done|blocked)/i)?.[1]?.toLowerCase() ?? null,
-    verdict: last(/VERDICT:\s*(PASS|FAIL)/i)?.[1]?.toUpperCase() ?? null,
-    changed: last(/CHANGED:\s*(.+)/i)?.[1]?.trim() ?? null,
-    tests: last(/TESTS:\s*(.+)/i)?.[1]?.trim() ?? null,
-    reasons: last(/REASONS:\s*([\s\S]+)/i)?.[1]?.trim() ?? null,
-    blocked: last(/BLOCKED:\s*(.+)/i)?.[1]?.trim() ?? null,
+    status: last(/STATUS:\s*(done|blocked)/gi)?.[1]?.toLowerCase() ?? null,
+    verdict: last(/VERDICT:\s*(PASS|FAIL)/gi)?.[1]?.toUpperCase() ?? null,
+    changed: last(/CHANGED:\s*(.+)/gi)?.[1]?.trim() ?? null,
+    tests: last(/TESTS:\s*(.+)/gi)?.[1]?.trim() ?? null,
+    reasons: last(/REASONS:\s*([\s\S]+)/gi)?.[1]?.trim() ?? null,
+    blocked: last(/BLOCKED:\s*(.+)/gi)?.[1]?.trim() ?? null,
     tail,
   };
 }
@@ -514,8 +562,14 @@ function parseReport(screen) {
 // ---------------------------------------------------------------------------
 
 async function makeWorktree(root, branch, base) {
+  // Reuse an existing worktree (a previous run may have left real work in it).
+  const existing = await git(["worktree", "list", "--porcelain"], REPO_ROOT);
+  if (existing.stdout.includes(`worktree ${root.replace(/\\/g, "/")}`)) {
+    return { reused: true };
+  }
   fs.mkdirSync(path.dirname(root), { recursive: true });
   await git(["worktree", "add", "-b", branch, root, base], REPO_ROOT, 300_000);
+  return { reused: false };
 }
 
 async function removeWorktree(root, branch) {
@@ -551,7 +605,8 @@ async function runItem(item, ctx) {
   log(`  worktree: ${worktree}`);
   log(`  scope:    ${allowed}`);
 
-  await makeWorktree(worktree, branch, base);
+  const wt = await makeWorktree(worktree, branch, base);
+  if (wt.reused) log("  reusing the existing worktree from a previous run");
 
   // dependencies for the worktree (pnpm store makes this quick)
   if (!fs.existsSync(path.join(worktree, "node_modules"))) {

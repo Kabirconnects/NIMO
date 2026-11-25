@@ -14,11 +14,15 @@ other worktrees. Stay strictly inside your worktree.
 
 ## Rules (still binding)
 
-1. Fix every failure listed above. Do not go beyond the item's scope.
+1. Fix every failure listed above. Do not go beyond the item's scope, and **leave no
+   other files behind** — no notes, reports, scratch files or summaries of your own work
+   anywhere in the repository.
 2. **No leftovers**: no `TODO`, `FIXME`, `XXX`, `HACK`, `not implemented`, `unimplemented`,
    `@ts-ignore`, `@ts-expect-error`, or `stub` on added lines. No placeholder bodies.
 3. Keep or add the automated test that proves the behavior. A fix without a test is incomplete.
 4. Re-run the gate commands and paste the real output. Never claim a pass you did not see.
+   If a command cannot run at all (the Bash classifier may be unavailable), say so and
+   stop retrying — the orchestrator runs the gates itself.
 5. Do not edit the checklist or any evidence log. Do not commit.
 6. The worktree may already contain your previous attempt's changes. Keep them if they are
    right, replace them if they caused a failure.

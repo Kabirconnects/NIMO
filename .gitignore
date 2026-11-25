@@ -18,10 +18,9 @@ coverage
 out/
 next-env.d.ts
 
-# The plan executor's live state file changes on every run; the ledger next to
-# it is the durable record and is committed.
+# The plan executor's live state file changes on every run; the ledger and the
+# baseline next to it are the durable record and are committed.
 .planning/plan-executor/*/state.json
-.planning/plan-executor/*/baseline.json
 
 
 # production build output

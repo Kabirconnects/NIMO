@@ -92,6 +92,29 @@ touch, and S0 is what creates one.
       even takes an unused `_policy` parameter. The `memory_policies` table is never
       consulted, so a user's own policy settings are ignored. Load the owner's policy
       and use it on every write path.
+      The table already exists — `memory_policies` in
+      `packages/memory/src/storage/db.ts:162` — with one row per owner:
+      `allow_automatic_capture`, `allow_inferred_memories`, `allow_automatic_merge`,
+      `allow_automatic_evolution`, `default_visibility`, `max_evidence_age_days`,
+      `max_confidence_auto_activation` and `excluded_categories` (a JSON array in a
+      text column). Nothing reads it. `MemoryPolicy`
+      (`packages/memory/src/domain/governance.types.ts:19`) has the same fields, so a
+      row maps onto it one for one, and every call site already has the owner id.
+      Also make `containsExcludedContent` (`policy.ts:146-151`) use the policy it is
+      given instead of ignoring it: today it only runs the built-in detector, so a
+      policy that excludes a category excludes nothing. `excluded_categories` **adds
+      to** the built-in list, it does not replace it — a policy that lists nothing
+      must still block every credential the detector finds, or the fix would weaken
+      the current behaviour.
+      Testing this: the memory package's tests are plain `tsx scripts/<name>-test.ts`
+      runners (`packages/memory/package.json`, `test:all`). Put the new test in its
+      own `scripts/<name>-test.ts` file **and add it to the `test:all` script** — a
+      test that nothing runs is not a test. The database path comes from
+      `PAME_DB_PATH` (`packages/memory/src/storage/db.ts:29`) and the database handle
+      is opened on first use, so set `PAME_DB_PATH` to a temporary file **before** the
+      first import that touches the store. The test should write a policy row for one
+      owner (e.g. `allow_automatic_capture = 0`) and show that a write for that owner
+      is refused while another owner is unaffected.
 
 ## S4 — Agents: command reuse collides on the joined command line
 
@@ -118,12 +141,24 @@ touch, and S0 is what creates one.
 - [ ] `apps/web/src/features/auth/hooks/use-logout.ts:15-17` clears the cache only in
       `onSuccess`, with no `onError`. If the logout request fails, the client keeps
       the old session cached. Clear it in both paths.
+      Testing this: the web package's tests run under plain Node (no bundler), where
+      `import.meta.env` is undefined — a test cannot import a module that pulls in
+      `@/lib/api-client` — and the hook is a React hook. Put the cache-clearing in
+      its own module that imports nothing from the app (it can take the query client
+      as an argument), call it from both `onSuccess` and `onError`, and test that
+      module with a fake query client that records what was set.
 
 ## S7 — Web: raw internal error text reaches the UI
 
 - [ ] `apps/web/src/lib/api-error.ts:34-35` returns any `Error.message` to the user,
       which can expose internal details. Show a safe, human-readable message and keep
       the raw text for logging only.
+      Testing this: `api-error.ts` imports only axios, so a test can import it
+      directly under plain Node (`tsx scripts/web-test.ts`, the runner the web
+      package uses — follow the pattern of the existing test modules there). The test
+      should show that a plain `Error` carrying an internal message yields a safe
+      message instead, and that the axios error path still returns the server's own
+      message.
 
 ## S8 — Web: the production API URL is a placeholder
 
@@ -131,6 +166,11 @@ touch, and S0 is what creates one.
       `https://api.yourdomain.com` when `VITE_API_URL` is unset. In production the
       app then talks to a domain that does not exist. Fail loudly with a clear
       configuration error instead of silently using a placeholder.
+      Testing this: `api-client.ts` reads `import.meta.env`, which is undefined under
+      plain Node — a test cannot import it. Put the URL decision in its own module
+      that takes the environment as an argument (e.g. `{ prod, configuredUrl }`) and
+      throws a clear configuration error when the production URL is missing; use it
+      from `api-client.ts` and test that module.
 
 ---
 

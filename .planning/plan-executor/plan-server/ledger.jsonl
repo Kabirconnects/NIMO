@@ -777,3 +777,25 @@
 {"ts":"2026-11-25T08:32:15.795Z","msg":"  rebase conflict -> item blocked"}
 {"ts":"2026-11-25T08:32:15.796Z","msg":"\nsummary: 4 merged, 1 blocked"}
 {"ts":"2026-11-25T08:32:15.797Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-server\\state.json"}
+{"ts":"2026-11-25T08:43:47.038Z","msg":"\n=== merge-only mode: no workers are spawned ==="}
+{"ts":"2026-11-25T08:43:47.044Z","msg":"\n=== s2-server-login-has-no-rate-limiting-01 (open) S2 — Server: login has no rate limiting ==="}
+{"ts":"2026-11-25T08:43:47.044Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T08:43:47.044Z","msg":"s2-server-login-has-no-rate-limiting-01: blocked, left in place for inspection"}
+{"ts":"2026-11-25T08:43:47.044Z","msg":"\nsummary: 4 merged, 1 blocked"}
+{"ts":"2026-11-25T08:43:47.044Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-server\\state.json"}
+{"ts":"2026-11-25T08:44:25.472Z","msg":"\n=== merge-only mode: no workers are spawned ==="}
+{"ts":"2026-11-25T08:44:25.473Z","msg":"\n=== s2-server-login-has-no-rate-limiting-01 (open) S2 — Server: login has no rate limiting ==="}
+{"ts":"2026-11-25T08:44:25.473Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T08:44:25.562Z","msg":"  merging onto main @ eb77bdd"}
+{"ts":"2026-11-25T08:44:25.685Z","msg":"  rebase conflict -> resolving"}
+{"ts":"2026-11-25T08:44:25.875Z","msg":"    conflicted files: apps/server/scripts/server-test.ts"}
+{"ts":"2026-11-25T08:45:17.587Z","msg":"  conflict could not be resolved -> item blocked"}
+{"ts":"2026-11-25T08:45:17.589Z","msg":"\nsummary: 4 merged, 1 blocked"}
+{"ts":"2026-11-25T08:45:17.589Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-server\\state.json"}
+{"ts":"2026-11-25T08:58:54.747Z","msg":"\n=== merge-only mode: no workers are spawned ==="}
+{"ts":"2026-11-25T08:58:54.751Z","msg":"\n=== s2-server-login-has-no-rate-limiting-01 (open) S2 — Server: login has no rate limiting ==="}
+{"ts":"2026-11-25T08:58:54.751Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T08:58:54.866Z","msg":"  merging onto main @ b0d312a"}
+{"ts":"2026-11-25T09:00:14.129Z","msg":"  merged and recorded: s2-server-login-has-no-rate-limiting-01"}
+{"ts":"2026-11-25T09:00:14.130Z","msg":"\nsummary: 5 merged, 0 blocked"}
+{"ts":"2026-11-25T09:00:14.130Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-server\\state.json"}

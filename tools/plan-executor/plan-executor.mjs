@@ -1219,6 +1219,23 @@ async function runIndependentReview({
 }
 
 /**
+ * The changed lines of a commit range, without context.
+ *
+ * Two diffs of the same change are equal when their changed lines are equal,
+ * even if the surrounding context moved. That is what makes it usable across a
+ * rebase: the base branch moves, the context moves with it, but the item's own
+ * change - the thing that was reviewed - either is the same or is not.
+ */
+async function patchSignature(worktree, base, head) {
+  const out = (await git(["diff", "-U0", `${base}..${head}`], worktree)).stdout;
+  return out
+    .split(/\r?\n/)
+    .filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l))
+    .map((l) => l.trim())
+    .join("\n");
+}
+
+/**
  * Resolve a rebase conflict with a dedicated agent.
  *
  * Two items that touch the same file conflict as soon as the first one is
@@ -1335,6 +1352,53 @@ async function resolveRebaseConflict({ result, ctx, baseSha, log }) {
 }
 
 /**
+ * Re-prove and re-review an item's code against the CURRENT base.
+ *
+ * Used in two situations:
+ *  - after a conflict was resolved (the code changed under the reviewer),
+ *  - after a rebase changed the diff (the base moved and the item's change no
+ *    longer looks the same).
+ *
+ * In both cases the code that is about to land is not the code that was
+ * reviewed, so it gets looked at again.
+ */
+async function proveAndReview({ result, ctx, baseSha, log, prefix }) {
+  const worktree = result.worktree;
+
+  // The proof now compares against the NEW base: the old source is what the
+  // branch would have merged onto before the other item landed.
+  const changed = (await git(["diff", "--name-only", baseSha], worktree)).stdout
+    .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const sourceChanged = changed.filter((f) => /(^|\/)src\//.test(f));
+  const proof = await checkTestsProveTheChange({
+    worktree, base: baseSha, sourceChanged, gates: ctx.gates, baseline: ctx.baseline, onLog: log,
+  });
+  if (proof?.gate) {
+    return { ok: false, reason: `${proof.gate}: ${proof.detail}` };
+  }
+  if (proof?.detail) result.proof = proof.detail;
+
+  const head = (await git(["rev-parse", "HEAD"], worktree)).stdout.trim();
+  const briefDir = path.join(os.tmpdir(), "nimo-plan", ctx.planId, result.itemId);
+  fs.mkdirSync(briefDir, { recursive: true });
+  const { verdict } = await runIndependentReview({
+    item: ctx.item, itemId: result.itemId, worktree, base: baseSha, head,
+    ctx, briefDir, log, prefix,
+  });
+  if (verdict.verdict !== "PASS") {
+    return {
+      ok: false,
+      reason: `the reviewer did not pass the code: ${verdict.verdict ?? "NO VERDICT"}: ${verdict.reasons ?? "(no reasons given)"}`,
+    };
+  }
+
+  result.head = head;
+  result.changed = changed;
+  result.signature = await patchSignature(worktree, baseSha, head);
+  return { ok: true };
+}
+
+/**
  * Re-verify an item after its code was changed by a conflict resolution.
  *
  * The reviewed diff is no longer the diff that is about to be merged, so the
@@ -1387,34 +1451,7 @@ async function verifyAfterResolution({ result, ctx, baseSha, log }) {
     }
   }
 
-  // The proof now compares against the NEW base: the old source is what the
-  // branch would have merged onto before the other item landed.
-  const changed = (await git(["diff", "--name-only", baseSha], worktree)).stdout
-    .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  const sourceChanged = changed.filter((f) => /(^|\/)src\//.test(f));
-  const proof = await checkTestsProveTheChange({
-    worktree, base: baseSha, sourceChanged, gates: ctx.gates, baseline: ctx.baseline, onLog: log,
-  });
-  if (proof?.gate) return { ok: false, reason: `after the conflict was resolved, ${proof.gate}: ${proof.detail}` };
-  if (proof?.detail) result.proof = proof.detail;
-
-  const head = (await git(["rev-parse", "HEAD"], worktree)).stdout.trim();
-  const briefDir = path.join(os.tmpdir(), "nimo-plan", ctx.planId, result.itemId);
-  fs.mkdirSync(briefDir, { recursive: true });
-  const { verdict } = await runIndependentReview({
-    item: ctx.item, itemId: result.itemId, worktree, base: baseSha, head,
-    ctx, briefDir, log, prefix: "review2",
-  });
-  if (verdict.verdict !== "PASS") {
-    return {
-      ok: false,
-      reason: `the reviewer rejected the conflict resolution: ${verdict.verdict ?? "NO VERDICT"}: ${verdict.reasons ?? "(no reasons given)"}`,
-    };
-  }
-
-  result.head = head;
-  result.changed = changed;
-  return { ok: true };
+  return proveAndReview({ result, ctx, baseSha, log, prefix: "review2" });
 }
 
 /**
@@ -1688,6 +1725,9 @@ async function runItem(item, ctx) {
       worktree,
       branch,
       head,
+      // The changed lines, so the merge phase can tell whether the code that
+      // is about to land is still the code that was reviewed.
+      signature: await patchSignature(worktree, base, head),
       changed: committedFiles.length ? committedFiles : gateResult.changed,
       commandResults: gateResult.commandResults,
       proof: gateResult.proofDetail ?? null,
@@ -1792,6 +1832,25 @@ async function mergeItem(result, ctx) {
           log(`  post-rebase gate failed: ${cmd}`);
           return { ok: false, reason: `post-rebase gate failed: ${cmd}` };
         }
+      }
+
+      // The code that lands must be the code that was reviewed. A rebase
+      // always changes the commit, but it only changes the *change* when the
+      // base moved underneath it - and then the reviewer has to look again.
+      const newHead = (await git(["rev-parse", "HEAD"], result.worktree)).stdout.trim();
+      const newSignature = await patchSignature(result.worktree, baseSha, newHead);
+      if (newSignature !== result.signature) {
+        log("  the change differs from what was reviewed -> proving and re-reviewing it");
+        const rechecked = await proveAndReview({
+          result, ctx, baseSha, log, prefix: "review2",
+        });
+        if (!rechecked.ok) {
+          log("  the re-review did not pass -> item blocked");
+          return { ok: false, reason: rechecked.reason };
+        }
+        log("  the change was proved and reviewed again");
+      } else {
+        result.head = newHead;
       }
     }
 

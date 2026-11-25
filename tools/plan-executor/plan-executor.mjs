@@ -301,6 +301,25 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
           `Write a test that fails without the change.`,
       };
     }
+    if (!currentFailures.length) {
+      // The command died without naming a failing test - usually a compile error
+      // because the new test imports something the old source does not have.
+      // That is a weak proof: the test did not detect the change, it could not
+      // even load. Say so instead of calling it a pass.
+      onLog?.(
+        `    proof: inconclusive - the suite could not run against the old source ` +
+        `(no named test failure, probably a compile error)`,
+      );
+      return {
+        gate: "proof",
+        detail:
+          `the proof of this change is inconclusive: with the pre-change source in ` +
+          `place, \`${cmd}\` failed without reporting a named test failure (it could ` +
+          `not compile or load against the old source), so the tests do not ` +
+          `demonstrate the behaviour they are supposed to. Write the test so it ` +
+          `runs against both versions and fails on the old one.`,
+      };
+    }
     if (known.length && !newFailures.length) {
       return {
         gate: "proof",
@@ -309,7 +328,7 @@ async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, 
           `\`${cmd}\` failed only for reasons that already failed at baseline.`,
       };
     }
-    onLog?.(`    proof: the tests fail without the change (${newFailures.length || "compile"} new failure(s))`);
+    onLog?.(`    proof: the tests fail without the change (${newFailures.length} new failure(s))`);
     return null;
   } finally {
     // Put the worker's source back, byte for byte.
@@ -593,6 +612,16 @@ async function runGates({
         failures.push({
           gate: "command",
           detail: `\`${cmd}\` exited ${r.code} with NEW failures: ${newFailures.slice(0, 5).join(" | ")}`,
+        });
+      } else if (!currentFailures.length) {
+        // The command died without reporting any named failure - a crash, a
+        // compile error, a missing binary. That is never a "known" failure,
+        // however full the baseline is.
+        failures.push({
+          gate: "command",
+          detail:
+            `\`${cmd}\` exited ${r.code} without reporting a test failure ` +
+            `(it crashed or could not compile). Output tail:\n${tail}`,
         });
       } else if (known.length) {
         onLog?.(

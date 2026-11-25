@@ -1026,8 +1026,9 @@ async function agentStatus(address) {
 }
 
 /** hc names are limited to 32 chars of [a-z0-9-_]. */
-function agentName(prefix, itemId) {
-  return `${prefix}-${itemId}`.slice(0, 32).replace(/-+$/, "");
+function agentName(prefix, itemId, attempt = null) {
+  const suffix = attempt === null ? "" : `-a${attempt}`;
+  return `${prefix}-${itemId}${suffix}`.slice(0, 32).replace(/-+$/, "");
 }
 
 /**
@@ -1844,21 +1845,52 @@ async function runItem(item, ctx) {
     patchedFiles = install.patched;
   }
 
-  const implementer = await spawnAgent(agentName("plan", itemId), worktree, ctx.parent);
-  log(`  implementer: ${implementer.address}`);
-
   let lastFailures = [];
   let lastBlockReason = null;
   let result = { status: "blocked" };
+  let implementer = null;
 
-  for (let attempt = 1; attempt <= args.attempts; attempt++) {
+  // A worktree that is being reused carries the previous run's work - and the
+  // previous run's failures. Starting again from the implement brief would
+  // make the worker rediscover what the harness already knows, so a reused
+  // worktree starts at the FIX brief with the recorded failures in it.
+  let startAttempt = 1;
+  if (wt.reused) {
+    const previous = state.items[itemId];
+    if (previous?.failures?.length) {
+      lastFailures = previous.failures;
+      startAttempt = 2;
+      log(`  the previous run failed with: ${previous.failures.map((f) => f.gate).join(", ")}`);
+      log("  starting from the fix brief, with those failures in it");
+    }
+  }
+
+  for (let attempt = startAttempt; attempt <= args.attempts; attempt++) {
+    // A fresh agent per attempt.
+    //
+    // The previous agent's screen still carries its last report trailer, and
+    // the harness reads the trailer off the screen. If the worker is still
+    // busy when the next brief is sent, the brief is queued and not echoed -
+    // so the trailer the harness finds belongs to the PREVIOUS turn. The item
+    // is then "retried" without the worker ever seeing the failure it was
+    // given, and the same failure is reported three times.
+    //
+    // We saw exactly that: an item failed the same way on all three attempts
+    // while the worker was still debugging the first one. A new agent has an
+    // empty screen, so a trailer on it is always this attempt's.
+    if (implementer) {
+      await hc(["kill", implementer.address]);
+      await hc(["rm", implementer.address]);
+    }
+    implementer = await spawnAgent(agentName("plan", itemId, attempt), worktree, ctx.parent);
+    log(`  implementer: ${implementer.address}`);
+
     const template = fs.readFileSync(
       path.join(BRIEFS, attempt === 1 ? "implement.md" : "fix.md"),
       "utf8",
     );
     const vars = {
-      ITEM_ID: itemId,
-      SECTION: item.section,
+      ITEM_ID: itemId,      SECTION: item.section,
       ITEM_TEXT: item.text,
       WORKTREE: worktree,
       PACKAGE_ROOT: packageRoot,
@@ -1983,6 +2015,7 @@ async function runItem(item, ctx) {
 
   if (result.status !== "ready") {
     await hc(["kill", implementer.address]);
+    await hc(["rm", implementer.address]);
     state.items[itemId] = {
       status: "blocked",
       failures: lastFailures,
@@ -1995,6 +2028,7 @@ async function runItem(item, ctx) {
   }
 
   await hc(["kill", result.implementer]);
+  await hc(["rm", result.implementer]);
   state.items[itemId] = { status: "ready", ...result };
   return result;
 }

@@ -261,32 +261,93 @@ function parseChecklist(file) {
  * against the repo, or a path like `apps/server` ends up pointing at
  * `<checklist's package>/apps/server` - a directory that does not exist.
  *
+ * A package-relative path is resolved against EVERY scoped package, not just
+ * the first one: a checklist that spans several packages has no single "its"
+ * package, and resolving `src/lib/api-error.ts` against the wrong one points
+ * the worker at a file that does not exist - while the real one is passed over.
+ *
  * Only paths that exist (or whose directory exists, for a file to be created)
  * are returned: the text also contains things like `tsx scripts/<name>-test.ts`
  * and `echo 'no tests' && exit 0`, which are not paths at all.
  */
-function itemPaths(item, packageRoot, repoRoot) {
+function itemPaths(item, packageRoot, repoRoot, scopeRels = []) {
   const found = new Set();
   const candidates = [];
   for (const m of item.text.matchAll(/`([^`]+)`/g)) candidates.push(m[1]);
   for (const m of item.text.matchAll(/\b((?:src|scripts|test|tests)\/[\w./*-]+)/g))
     candidates.push(m[1]);
-  const pkgRel = path.relative(repoRoot, packageRoot).replace(/\\/g, "/");
+
+  const scopes = scopeRels.length
+    ? scopeRels
+    : [path.relative(repoRoot, packageRoot).replace(/\\/g, "/")];
+  const repoRelPaths = [];
+  const packageRel = [];
+  const packageRelResolved = new Set();
+
+  // A path with a line number on it is still a path: `file.ts:57` and
+  // `file.ts:34-35` both name `file.ts`.
+  const clean = (token) =>
+    token.trim().replace(/[.,;)]+$/, "").replace(/:\d+(?:-\d+)?(?::\d+)?$/, "");
+
+  // First pass: the repo-relative paths. They are unambiguous, and they say
+  // which package the item is about - which is how a package-relative path
+  // that does not exist yet (a script the item is going to create) finds its
+  // package.
   for (const raw of candidates) {
-    const token = raw.trim().replace(/[.,;)]+$/, "");
+    const token = clean(raw);
     if (!token || token.length > 120) continue;
     if (!/[/\\]|\.(ts|tsx|js|json|md)$/.test(token)) continue;
     if (/^https?:/i.test(token)) continue;
     const normalized = token.replace(/\\/g, "/");
-    // A path inside a package is package-relative; anything else is
-    // repo-relative.
-    const repoRel = /^(src|scripts|test|tests)\//.test(normalized)
-      ? path.posix.join(pkgRel, normalized)
-      : normalized;
-    const abs = path.join(repoRoot, repoRel);
-    const dir = path.dirname(abs);
-    if (!fs.existsSync(abs) && !fs.existsSync(dir)) continue;
-    found.add(repoRel);
+    if (/^(src|scripts|test|tests)\//.test(normalized)) {
+      packageRel.push(normalized);
+      continue;
+    }
+    const abs = path.join(repoRoot, normalized);
+    // A bare file name (no directory) only counts if the file is really
+    // there - otherwise every name in the item would point at the repo root.
+    const exists = normalized.includes("/")
+      ? fs.existsSync(abs) || fs.existsSync(path.dirname(abs))
+      : fs.existsSync(abs);
+    if (exists) {
+      found.add(normalized);
+      repoRelPaths.push(normalized);
+    }
+  }
+
+  // The package the item is about: the one its repo-relative paths live in.
+  const hintScope = scopes.find((scope) =>
+    repoRelPaths.some((p) => p === scope || p.startsWith(scope + "/")),
+  );
+
+  // Second pass: the package-relative paths. A file that exists wins over
+  // every other package; the item's own package wins over a directory that
+  // merely happens to exist somewhere else.
+  for (const normalized of packageRel) {
+    let hit = null;
+    let dirHit = null;
+    const ordered = hintScope ? [hintScope, ...scopes.filter((s) => s !== hintScope)] : scopes;
+    for (const scope of ordered) {
+      const candidate = path.posix.join(scope, normalized);
+      const abs = path.join(repoRoot, candidate);
+      if (fs.existsSync(abs)) {
+        hit = candidate;
+        break;
+      }
+      if (!dirHit && fs.existsSync(path.dirname(abs))) dirHit = candidate;
+    }
+    const chosen = hit ?? dirHit;
+    if (chosen) {
+      found.add(chosen);
+      packageRelResolved.add(chosen);
+    }
+  }
+
+  // A package-relative candidate can also be the tail of a repo-relative path
+  // in the same item ("apps/web/src/lib/api-error.ts" also yields
+  // "src/lib/api-error.ts"). The repo-relative one is the real one.
+  for (const f of packageRelResolved) {
+    if (repoRelPaths.some((r) => r !== f && r.endsWith("/" + f))) found.delete(f);
   }
   return [...found];
 }
@@ -1160,7 +1221,7 @@ function parseReport(screen) {
     remaining: last(/REMAINING:\s*(.+)/gi)?.trim() ?? null,
     verdict: last(/VERDICT:\s*(PASS|FAIL)/gi)?.toUpperCase() ?? null,
     resolved: last(/RESOLVED:\s*(yes|no)/gi)?.toLowerCase() ?? null,
-    conflicts: last(/CONFLICTS:\s*([\s\S]+)/gi)?.trim() ?? null,
+    conflicts: last(/CONFLICTS:\s*(.+)/gi)?.trim() ?? null,
     changed: last(/CHANGED:\s*(.+)/gi)?.trim() ?? null,
     tests: last(/TESTS:\s*(.+)/gi)?.trim() ?? null,
     reasons: last(/REASONS:\s*([\s\S]+)/gi)?.trim() ?? null,
@@ -1345,9 +1406,9 @@ async function resolveRebaseConflict({ result, ctx, baseSha, log }) {
     }
   }
 
-  const note = report.conflicts
-    ? report.conflicts.split(/\r?\n/).slice(0, 4).join(" ")
-    : "the conflict was resolved";
+  const note = (report.conflicts ?? "the conflict was resolved")
+    .replace(/\s+/g, " ")
+    .slice(0, 300);
   return { ok: true, note, resolvedBy: report.resolved };
 }
 
@@ -1571,7 +1632,7 @@ async function runItem(item, ctx) {
   // The scope is what the gate enforces: the packages an item may touch.
   // The files the item names are only guidance - where the work belongs.
   const allowed = scopeRoots.join(", ");
-  const focus = itemPaths(item, packageRoot, REPO_ROOT);
+  const focus = itemPaths(item, packageRoot, REPO_ROOT, ctx.scopeRels);
   const gateText = gates.join("\n");
 
   log(`  worktree: ${worktree}`);
@@ -2110,7 +2171,15 @@ async function main() {
   log(`state:   ${stateFile}`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+// The CLI runs when this file is the entry point. Guarded so the self-test
+// can import the pure functions without starting a plan.
+const isEntryPoint =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isEntryPoint) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+export { itemPaths, parseChecklist, slug, collectFailures, patchSignature };

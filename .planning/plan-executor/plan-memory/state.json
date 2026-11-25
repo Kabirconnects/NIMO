@@ -1,0 +1,49 @@
+{
+  "planId": "plan-memory",
+  "checklist": "packages/memory/IMPLEMENTATION-CHECKLIST.md",
+  "base": "demo/plan-executor",
+  "items": {
+    "p3-verification-regression-10": {
+      "status": "done",
+      "itemId": "p3-verification-regression-10",
+      "worktree": "C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\p3-verification-regression-10",
+      "branch": "plan/p3-verification-regression-10",
+      "head": "110615fa2b7286a0032221c12bab5ed8eecb2ae7",
+      "changed": [
+        "packages/memory/package.json",
+        "packages/memory/scripts/concurrency-test.ts"
+      ],
+      "commandResults": [
+        {
+          "cmd": "pnpm --filter @workspace/memory run typecheck",
+          "code": 0,
+          "tail": "$ tsc --noEmit",
+          "currentFailures": [],
+          "newFailures": [],
+          "preExisting": []
+        },
+        {
+          "cmd": "pnpm --filter @workspace/memory run lint",
+          "code": 0,
+          "tail": "$ eslint .",
+          "currentFailures": [],
+          "newFailures": [],
+          "preExisting": []
+        },
+        {
+          "cmd": "pnpm --filter @workspace/memory run test:all",
+          "code": 0,
+          "tail": "✅ q9 (multi-hop) recall=1.00 prec=0.50 mrr=1.00 latency=1ms | \"What happened to growth after knockout?\"\n✅ q10 (direct) recall=1.00 prec=0.50 mrr=1.00 latency=1ms | \"Genetic hypothesis about geneX\"\n✅ q11 (direct) recall=1.00 prec=0.33 mrr=1.00 latency=1ms | \"Motor calibration procedure\"\n✅ q12 (direct) recall=1.00 prec=0.50 mrr=1.00 latency=1ms | \"How to start API\"\n✅ q13 (negative) recall=1.00 prec=1.00 mrr=1.00 latency=1ms | \"Quantum chromodynamics\"\n✅ q14 (negative) recall=1.00 prec=1.00 mrr=1.00 latency=0ms | \"Unicode normalization forms\"\n✅ q15 (direct) recall=1.00 prec=1.00 mrr=1.00 latency=2ms | \"Goal of the project\"\n✅ q16 (semantic) recall=1.00 prec=0.50 mrr=1.00 latency=1ms | \"Which storage engine powers Nimo?\"\n✅ q17 (semantic) recall=1.00 prec=0.33 mrr=1.00 latency=1ms | \"What kind of answers does the user like?\"\n✅ q18 (semantic) recall=1.00 prec=1.00 mrr=1.00 latency=2ms | \"Tell me about the neuron firing concept\"\n\n$ tsx scripts/agi-test.ts && tsx scripts/dreamer-test.ts && tsx scripts/formula-deep-test.ts && tsx scripts/capture-dedup-test.ts && tsx scripts/evolve-test.ts && tsx scripts/hardening-test.ts && tsx scripts/concurrency-test.ts && tsx scripts/benchmark-runner.ts",
+          "currentFailures": [],
+          "newFailures": [],
+          "preExisting": []
+        }
+      ],
+      "itemState": "complete",
+      "remaining": null,
+      "reviewer": "t1v",
+      "implementer": "t1s",
+      "merge": null
+    }
+  }
+}

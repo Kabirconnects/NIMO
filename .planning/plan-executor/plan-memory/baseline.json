@@ -1,0 +1,9 @@
+{
+  "recordedAt": "2026-11-25T03:50:47.334Z",
+  "base": "main",
+  "commands": {
+    "pnpm --filter @workspace/memory run typecheck": [],
+    "pnpm --filter @workspace/memory run lint": [],
+    "pnpm --filter @workspace/memory run test:all": []
+  }
+}

@@ -5,7 +5,8 @@ import apiClient from "@/lib/api-client"
 import type { AuthResponse, User } from "../types"
 import { determineSessionState } from "../utils/session-state"
 
-export const sessionQueryKey = ["auth", "session"] as const
+import { sessionQueryKey } from "../utils/clear-session-cache"
+export { sessionQueryKey }
 
 function useSession() {
   const query = useQuery<User | null>({

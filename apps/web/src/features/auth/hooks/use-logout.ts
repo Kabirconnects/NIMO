@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import apiClient from "@/lib/api-client"
 
-import { sessionQueryKey } from "./use-session"
+import { clearSessionCache } from "../utils/clear-session-cache"
 
 function useLogout() {
   const queryClient = useQueryClient()
@@ -13,7 +13,10 @@ function useLogout() {
     // The server already cleared the cookie; mirror that locally so no guarded
     // screen keeps rendering a stale user.
     onSuccess: () => {
-      queryClient.setQueryData(sessionQueryKey, null)
+      clearSessionCache(queryClient)
+    },
+    onError: () => {
+      clearSessionCache(queryClient)
     },
   })
 }

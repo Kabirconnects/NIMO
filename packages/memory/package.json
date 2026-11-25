@@ -26,7 +26,8 @@
     "test:concurrency": "tsx scripts/concurrency-test.ts",
     "test:temporal": "tsx scripts/temporal-test.ts",
     "test:universal": "tsx scripts/universal-benchmark-runner.ts",
-    "test:all": "tsx scripts/agi-test.ts && tsx scripts/dreamer-test.ts && tsx scripts/formula-deep-test.ts && tsx scripts/capture-dedup-test.ts && tsx scripts/evolve-test.ts && tsx scripts/hardening-test.ts && tsx scripts/concurrency-test.ts && tsx scripts/temporal-test.ts && tsx scripts/benchmark-runner.ts",
+    "test:owner-policy": "tsx scripts/owner-policy-test.ts",
+    "test:all": "tsx scripts/agi-test.ts && tsx scripts/dreamer-test.ts && tsx scripts/formula-deep-test.ts && tsx scripts/capture-dedup-test.ts && tsx scripts/evolve-test.ts && tsx scripts/hardening-test.ts && tsx scripts/concurrency-test.ts && tsx scripts/temporal-test.ts && tsx scripts/benchmark-runner.ts && tsx scripts/owner-policy-test.ts",
     "ci": "npm test && npm run test:all"
   },
   "dependencies": {

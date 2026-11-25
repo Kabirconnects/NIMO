@@ -12,7 +12,8 @@ import Database from "better-sqlite3";
 import type { MemoryNode } from "../domain/memory.types.js";
 import type { MemoryEdge } from "../domain/memory-edge.types.js";
 import type { Experience } from "../domain/experience.types.js";
-import type { MemoryAuditEntry, MemoryRevision } from "../domain/governance.types.js";
+import type { MemoryAuditEntry, MemoryRevision, MemoryPolicy } from "../domain/governance.types.js";
+import { DEFAULT_POLICY } from "../governance/policy.js";
 
 // ---------------------------------------------------------------------------
 // Portable paths
@@ -881,6 +882,77 @@ export function repairAllGraphDegrees(): void {
       )
     `);
   } catch { /* table may not exist yet */ }
+}
+
+// ---- policies ----
+
+export function getPolicy(ownerId: string): MemoryPolicy {
+  const row = getDb()
+    .prepare("SELECT * FROM memory_policies WHERE owner_id = ?")
+    .get(ownerId) as Record<string, unknown> | undefined;
+
+  if (!row) {
+    return DEFAULT_POLICY;
+  }
+
+  return {
+    allowAutomaticCapture: Boolean(row.allow_automatic_capture),
+    allowInferredMemories: Boolean(row.allow_inferred_memories),
+    allowAutomaticMerge: Boolean(row.allow_automatic_merge),
+    allowAutomaticEvolution: Boolean(row.allow_automatic_evolution),
+    defaultVisibility: (row.default_visibility as MemoryPolicy["defaultVisibility"]) ?? "private",
+    maxEvidenceAgeDays: row.max_evidence_age_days != null ? Number(row.max_evidence_age_days) : undefined,
+    maxMemoryConfidenceForAutoActivation: Number(row.max_confidence_auto_activation ?? 0.5),
+    excludedCategories: parseJson<string[]>(String(row.excluded_categories ?? "[]"), DEFAULT_POLICY.excludedCategories),
+  };
+}
+
+export function setPolicy(ownerId: string, policy: Partial<MemoryPolicy>): MemoryPolicy {
+  return withTransaction(() => {
+    const existing = getPolicy(ownerId);
+    const merged: MemoryPolicy = {
+      allowAutomaticCapture: policy.allowAutomaticCapture ?? existing.allowAutomaticCapture,
+      allowInferredMemories: policy.allowInferredMemories ?? existing.allowInferredMemories,
+      allowAutomaticMerge: policy.allowAutomaticMerge ?? existing.allowAutomaticMerge,
+      allowAutomaticEvolution: policy.allowAutomaticEvolution ?? existing.allowAutomaticEvolution,
+      defaultVisibility: policy.defaultVisibility ?? existing.defaultVisibility,
+      maxEvidenceAgeDays: policy.maxEvidenceAgeDays !== undefined ? policy.maxEvidenceAgeDays : existing.maxEvidenceAgeDays,
+      maxMemoryConfidenceForAutoActivation: policy.maxMemoryConfidenceForAutoActivation ?? existing.maxMemoryConfidenceForAutoActivation,
+      excludedCategories: policy.excludedCategories ?? existing.excludedCategories,
+    };
+
+    const t = now();
+    getDb()
+      .prepare(
+        `INSERT INTO memory_policies (owner_id, allow_automatic_capture, allow_inferred_memories, allow_automatic_merge, allow_automatic_evolution, default_visibility, max_evidence_age_days, max_confidence_auto_activation, excluded_categories, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(owner_id) DO UPDATE SET
+           allow_automatic_capture = excluded.allow_automatic_capture,
+           allow_inferred_memories = excluded.allow_inferred_memories,
+           allow_automatic_merge = excluded.allow_automatic_merge,
+           allow_automatic_evolution = excluded.allow_automatic_evolution,
+           default_visibility = excluded.default_visibility,
+           max_evidence_age_days = excluded.max_evidence_age_days,
+           max_confidence_auto_activation = excluded.max_confidence_auto_activation,
+           excluded_categories = excluded.excluded_categories,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        ownerId,
+        merged.allowAutomaticCapture ? 1 : 0,
+        merged.allowInferredMemories ? 1 : 0,
+        merged.allowAutomaticMerge ? 1 : 0,
+        merged.allowAutomaticEvolution ? 1 : 0,
+        merged.defaultVisibility,
+        merged.maxEvidenceAgeDays ?? null,
+        merged.maxMemoryConfidenceForAutoActivation,
+        JSON.stringify(merged.excludedCategories),
+        t,
+        t,
+      );
+
+    return merged;
+  });
 }
 
 // ---- revisions & audit ----

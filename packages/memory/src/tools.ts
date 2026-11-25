@@ -25,6 +25,7 @@ import {
   requirePermission,
   MemoryAccessError,
 } from "./runtime/context.js";
+import { getPolicy } from "./storage/db.js";
 
 function ownerId(): string {
   return requireMemoryContext().ownerId;
@@ -249,10 +250,12 @@ export const memoryWriteTools: ToolSet = {
     execute: async (input) => {
       try {
         requirePermission("write");
-        const gate = evaluateWrite("create", input.content, DEFAULT_POLICY);
+        const oid = ownerId();
+        const policy = getPolicy(oid);
+        const gate = evaluateWrite("create", input.content, policy);
         if (gate.decision === "deny") return { success: false as const, error: gate.reason };
         const node = memoryService.teach({
-          ownerId: ownerId(),
+          ownerId: oid,
           type: input.type,
           content: input.content,
           topic: input.topic,
@@ -286,7 +289,9 @@ export const memoryWriteTools: ToolSet = {
     execute: async (input) => {
       try {
         requirePermission("write");
-        const gate = evaluateWrite("create", input.content, DEFAULT_POLICY);
+        const oid = ownerId();
+        const policy = getPolicy(oid);
+        const gate = evaluateWrite("create", input.content, policy);
         if (gate.decision === "deny") {
           return { success: false as const, error: gate.reason };
         }

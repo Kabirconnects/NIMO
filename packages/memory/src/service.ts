@@ -42,6 +42,7 @@ import {
   listActiveSkills,
   updateSkill,
   withTransaction,
+  getPolicy,
 } from "./storage/db.js";
 
 /** A write was rejected by governance (secret, denial, forbidden field). */
@@ -52,9 +53,10 @@ export class MemoryPolicyError extends Error {
   }
 }
 
-function assertWritableText(label: string, text: string | undefined): void {
+function assertWritableText(label: string, text: string | undefined, ownerId?: string): void {
   if (!text) return;
-  const gate = evaluateWrite("create", text, DEFAULT_POLICY);
+  const policy = ownerId ? getPolicy(ownerId) : DEFAULT_POLICY;
+  const gate = evaluateWrite("create", text, policy);
   if (gate.decision === "deny") {
     throw new MemoryPolicyError(`${label}: ${gate.reason}`);
   }
@@ -105,15 +107,16 @@ export const memoryService: MemoryService = {
       keywords: input.keywords,
       tags: input.tags,
       concepts: input.concepts,
-    }));
+    }), input.ownerId);
     assertNotDenial(input.content);
+    const policy = getPolicy(input.ownerId);
 
     return withTransaction(() => {
       const node = insertMemory({
         ownerId: input.ownerId,
         type: input.type,
         status: "active",
-        visibility: DEFAULT_POLICY.defaultVisibility,
+        visibility: policy.defaultVisibility,
         content: input.content,
         summary: input.summary ?? input.content.slice(0, 120),
         concepts: input.concepts ?? [],
@@ -159,7 +162,7 @@ export const memoryService: MemoryService = {
       tags: changes.tags,
       concepts: changes.concepts,
     });
-    assertWritableText("update", nextText);
+    assertWritableText("update", nextText, ownerId);
     if (changes.content !== undefined) assertNotDenial(changes.content);
 
     return withTransaction(() => {
@@ -291,8 +294,9 @@ export const memoryService: MemoryService = {
       keywords: input.keywords,
       tags: input.tags,
       concepts: input.concepts,
-    }));
+    }), input.ownerId);
     assertNotDenial(input.content);
+    const policy = getPolicy(input.ownerId);
 
     const keywords = [...new Set([
       ...(input.keywords ?? []),
@@ -303,7 +307,7 @@ export const memoryService: MemoryService = {
         ownerId: input.ownerId,
         type: input.type,
         status: "active",
-        visibility: DEFAULT_POLICY.defaultVisibility,
+        visibility: policy.defaultVisibility,
         content: input.content,
         summary: input.summary ?? input.content.slice(0, 120),
         concepts: input.concepts ?? [],
@@ -334,7 +338,7 @@ export const memoryService: MemoryService = {
       steps: input.steps,
       keywords: input.keywords,
       tags: input.tags,
-    }));
+    }), input.ownerId);
     return withTransaction(() => insertSkill(input));
   },
 
@@ -406,10 +410,11 @@ export const memoryService: MemoryService = {
       (s) => s.name === skillInput.name && s.whenToUse === skillInput.whenToUse,
     );
     if (dup) return [];
+    const policy = getPolicy(input.ownerId);
     const gate = evaluateWrite(
       "create",
       textFields({ name: skillInput.name, whenToUse: skillInput.whenToUse, steps: skillInput.steps }),
-      DEFAULT_POLICY,
+      policy,
     );
     if (gate.decision === "deny") return [];
     return [insertSkill(skillInput)];

@@ -17,14 +17,16 @@ import { capture } from "./capture.js";
 import { extractCandidates } from "./extract.js";
 import { validateCandidates } from "./validate.js";
 import { consolidate } from "./consolidate.js";
-import { DEFAULT_POLICY, detectSecret, redactSecrets } from "../governance/policy.js";
-import { withTransaction } from "../storage/db.js";
+import { DEFAULT_POLICY, detectSecret, redactSecrets, containsExcludedContent } from "../governance/policy.js";
+import { withTransaction, getPolicy } from "../storage/db.js";
 
 export function ingest(input: IngestExperienceInput): IngestionResult {
+  const policy = getPolicy(input.ownerId);
+
   // 0. Secret gate runs BEFORE capture. A turn containing credentials is
   //    recorded only in redacted form — the raw secret must never reach the
   //    experiences table (it would otherwise survive every later cleanup).
-  const secret = detectSecret(input.content);
+  const secret = detectSecret(input.content) || containsExcludedContent(input.content, policy);
   const safeContent = secret ? redactSecrets(input.content) : input.content;
 
   // 1. Capture always happens — every turn is preserved as an experience.
@@ -34,7 +36,7 @@ export function ingest(input: IngestExperienceInput): IngestionResult {
     type: input.type,
     messageId: input.messageId,
     occurredAt: input.occurredAt,
-    metadata: secret ? { redacted: true, reason: "secret" } : undefined,
+    metadata: secret ? { redacted: true, reason: "secret_or_excluded" } : undefined,
   });
 
   if (secret) {
@@ -45,7 +47,7 @@ export function ingest(input: IngestExperienceInput): IngestionResult {
     };
   }
 
-  if (!DEFAULT_POLICY.allowAutomaticCapture) {
+  if (!policy.allowAutomaticCapture) {
     return {
       experienceId: experience.id,
       created: 0, updated: 0, merged: 0, linked: 0, rejected: 0,
@@ -65,7 +67,7 @@ export function ingest(input: IngestExperienceInput): IngestionResult {
   }
 
   // 3. Validate against governance policy.
-  const { accepted, rejected } = validateCandidates(candidates, DEFAULT_POLICY);
+  const { accepted, rejected } = validateCandidates(candidates, policy);
   if (accepted.length === 0) {
     return {
       experienceId: experience.id,

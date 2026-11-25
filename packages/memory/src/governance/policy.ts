@@ -19,16 +19,7 @@ export const DEFAULT_POLICY: MemoryPolicy = {
   maxMemoryConfidenceForAutoActivation: 0.5,
   // Category labels. Detection is pattern-based (see below) so that ordinary
   // words like "tokenizer" or "token budget" are not mistaken for secrets.
-  excludedCategories: [
-    "password",
-    "api_key",
-    "secret",
-    "credential",
-    "aws_access_key",
-    "private_key",
-    "authorization",
-    "bearer_token",
-  ],
+  excludedCategories: [],
 };
 
 export type SecretCategory =
@@ -140,14 +131,29 @@ export function detectSecret(text: string): SecretDetection | null {
 }
 
 /**
- * Reject content that contains prohibited material (secrets, credentials).
- * Pattern-based, with word boundaries, so "tokenizer" and "token budget" pass.
+ * Reject content that contains prohibited material (secrets, credentials)
+ * or falls under any excluded category specified in the policy.
+ * `excluded_categories` adds to the built-in list, it does not replace it.
  */
 export function containsExcludedContent(
   text: string,
-  _policy: MemoryPolicy = DEFAULT_POLICY,
+  policy: MemoryPolicy = DEFAULT_POLICY,
 ): boolean {
-  return detectSecret(text) !== null;
+  if (detectSecret(text) !== null) {
+    return true;
+  }
+  const excluded = policy.excludedCategories ?? [];
+  if (excluded.length === 0) {
+    return false;
+  }
+  const lowerText = text.toLowerCase();
+  for (const cat of excluded) {
+    const re = new RegExp(`\\b${cat.toLowerCase().replace(/[_]/g, "[_\\- ]?")}\\b`, "i");
+    if (re.test(lowerText) || lowerText.includes(cat.toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -197,12 +203,20 @@ export function evaluateWrite(
   return { decision: "allow", reason: "Within policy.", requiresConfirmation: false };
 }
 
-/** Owner + visibility + status filter applied to retrieval results.
- *  Defence in depth: repositories also scope by ownerId in the query. */
-export function isRetrievable(node: MemoryNode, ownerId: string): boolean {
-  if (node.ownerId !== ownerId) return false;
-  if (node.status !== "active") return false;
-  if (node.validFrom && node.validFrom.getTime() > Date.now()) return false;
-  if (node.validUntil && node.validUntil.getTime() <= Date.now()) return false;
+/** Owner + visibility + status filter applied to retrieval results. */
+export function isRetrievable(node: MemoryNode, ownerId: string, policy: MemoryPolicy = DEFAULT_POLICY): boolean {
+  if (node.status === "deleted" || node.status === "superseded") {
+    return false;
+  }
+  if (node.visibility === "private" && node.ownerId !== ownerId) {
+    return false;
+  }
+  const nowTime = Date.now();
+  if (node.validFrom && node.validFrom.getTime() > nowTime) {
+    return false;
+  }
+  if (node.validUntil && node.validUntil.getTime() <= nowTime) {
+    return false;
+  }
   return true;
 }

@@ -6,11 +6,10 @@
 // is retried with backoff and eventually marked "dead" — an empty worker can
 // no longer mark a job successful.
 
-import { claimJob, finishJob, findExperience, withTransaction } from "../storage/db.js";
+import { claimJob, finishJob, findExperience, withTransaction, getPolicy } from "../storage/db.js";
 import { extractCandidates, roleForExperience } from "../ingestion/extract.js";
 import { validateCandidates } from "../ingestion/validate.js";
 import { consolidate } from "../ingestion/consolidate.js";
-import { DEFAULT_POLICY } from "../governance/policy.js";
 
 export function runIngestionWorkerOnce(): boolean {
   const job = claimJob("ingest");
@@ -28,10 +27,11 @@ export function runIngestionWorkerOnce(): boolean {
       throw new Error(`experience ${experienceId} not found for owner ${job.ownerId}`);
     }
 
+    const policy = getPolicy(job.ownerId);
     const candidates = extractCandidates(experience.content, {
       role: roleForExperience(experience.type),
     });
-    const { accepted } = validateCandidates(candidates, DEFAULT_POLICY);
+    const { accepted } = validateCandidates(candidates, policy);
     if (accepted.length > 0) {
       withTransaction(() => consolidate(job.ownerId, accepted, experience.id));
     }

@@ -9,6 +9,9 @@ repository: other agents work in other worktrees. Stay strictly inside your work
 
 ## The contract (every rule is checked mechanically afterwards)
 
+0. **Your worktree may already contain work from an earlier attempt.** If it does,
+   read it first: keep what is right, fix what is wrong, do not start over. The
+   orchestrator judges the final diff, not your effort.
 1. Implement the item **completely**. There is no partial credit and no "follow-up item".
 2. **No leftovers.** Your diff must not contain any of these strings on added lines:
    `TODO`, `FIXME`, `XXX`, `HACK`, `not implemented`, `unimplemented`, `@ts-ignore`,
@@ -18,7 +21,9 @@ repository: other agents work in other worktrees. Stay strictly inside your work
 3. **Tests are part of the item.** If you changed source, you must also add or change a
    test file. A fix without a test that proves it is incomplete work.
 4. **Tests must actually run and pass.** Run the gate commands below and paste the real
-   output. Never claim a command passed that you did not see pass.
+   output. Never claim a command passed that you did not see pass. The typecheck
+   covers the test files too, so a test with a type error is reported precisely —
+   read the error literally; it usually names the exact argument or line to change.
 5. **Stay in scope.** Change files only inside: {{ALLOWED_PATHS}}. Touch as few files as
    the item requires. Do not refactor unrelated code, do not reformat untouched files,
    do not bump dependencies. **Leave no other files behind**: no notes, reports, scratch

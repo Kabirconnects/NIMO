@@ -113,3 +113,28 @@
 {"ts":"2026-11-25T04:37:40.460Z","msg":"  installing dependencies in the worktree..."}
 {"ts":"2026-11-25T04:38:04.725Z","msg":"  implementer: t1w"}
 {"ts":"2026-11-25T04:38:04.727Z","msg":"  attempt 1: briefing implementer"}
+{"ts":"2026-11-25T04:58:57.868Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T04:58:58.843Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T04:59:01.399Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T04:59:03.780Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T04:59:08.699Z","msg":"    proof: re-running the tests against the pre-change source"}
+{"ts":"2026-11-25T04:59:14.280Z","msg":"    proof: the tests fail without the change (compile new failure(s))"}
+{"ts":"2026-11-25T04:59:14.344Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T04:59:14.347Z","msg":"  attempt 2: briefing implementer"}
+{"ts":"2026-11-25T04:59:15.028Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T04:59:16.015Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T04:59:18.662Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T04:59:20.911Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T04:59:25.383Z","msg":"    proof: re-running the tests against the pre-change source"}
+{"ts":"2026-11-25T04:59:30.299Z","msg":"    proof: the tests fail without the change (compile new failure(s))"}
+{"ts":"2026-11-25T04:59:30.363Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T04:59:30.615Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T04:59:30.615Z","msg":"c-temporal-memory-03: blocked, left in place for inspection"}
+{"ts":"2026-11-25T04:59:30.616Z","msg":"\nsummary: 1 merged, 1 blocked"}
+{"ts":"2026-11-25T04:59:30.616Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}
+{"ts":"2026-11-25T05:08:27.071Z","msg":"\n=== c-temporal-memory-03 (partial) C. Temporal Memory ==="}
+{"ts":"2026-11-25T05:08:27.078Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03"}
+{"ts":"2026-11-25T05:08:27.078Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory"}
+{"ts":"2026-11-25T05:08:27.350Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T05:08:29.635Z","msg":"  implementer: t1x"}
+{"ts":"2026-11-25T05:08:29.636Z","msg":"  attempt 1: briefing implementer"}

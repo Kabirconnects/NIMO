@@ -44,6 +44,17 @@
       "reviewer": "t1v",
       "implementer": "t1s",
       "merge": null
+    },
+    "c-temporal-memory-03": {
+      "status": "blocked",
+      "failures": [
+        {
+          "gate": "command",
+          "detail": "`pnpm --filter @workspace/memory run test:all` exited 1 and no baseline covers it. Output tail:\n     ^\n\nSqliteError: NOT NULL constraint failed: experiences.type\n    at captureExperience (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\storage\\db.ts:445:6)\n    at capture (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\ingestion\\capture.ts:18:10)\n    at ingest (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\ingestion\\ingest.ts:31:22)\n    at Object.remember (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\src\\service.ts:98:12)\n    at <anonymous> (C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03\\packages\\memory\\scripts\\temporal-test.ts:95:33) {\n  code: 'SQLITE_CONSTRAINT_NOTNULL'\n}\n\nNode.js v24.19.0"
+        }
+      ],
+      "worktree": "C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\c-temporal-memory-03",
+      "branch": "plan/c-temporal-memory-03"
     }
   }
 }

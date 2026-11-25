@@ -227,6 +227,73 @@ require('better-sqlite3')       -> sqlite OK -> { a: 7 }
 The harness's own self-heal was changed to match: try the build first, and if the
 build itself fails, fall back to skipping it.
 
+## 13. The typecheck gate never checked the tests — a broken test only failed at runtime
+
+`packages/memory/tsconfig.json` had `"include": ["src/**/*.ts"]`, and every test in
+that package lives in `scripts/`. So `pnpm run typecheck` never looked at a single
+test file.
+
+This is not theoretical. The worker on `c-temporal-memory-03` wrote a test that calls
+`memoryService.remember()` without the required `type` field:
+
+```ts
+// scripts/temporal-test.ts:95
+const ingestRes = memoryService.remember({
+  ownerId: OWNER,
+  role: "user",
+  content: "I prefer working in the terminal with Neovim",
+});
+```
+
+`IngestExperienceInput.type` is **required** (`domain/service.types.ts:21`), but
+`typecheck` passed, and the failure surfaced at runtime as:
+
+```
+SqliteError: NOT NULL constraint failed: experiences.type
+  at captureExperience (src/storage/db.ts:445:6)
+  at capture (src/ingestion/capture.ts:18:10)
+  at ingest (src/ingestion/ingest.ts:31:22)
+  at Object.remember (src/service.ts:98:12)
+  at scripts/temporal-test.ts:95:33
+```
+
+The error points at the **database**, not at the missing argument — so the worker
+spent a retry debugging the wrong layer, and the harness (correctly) blocked the
+item. With the test scripts included in the typecheck, the same defect reads:
+
+```
+scripts/temporal-test.ts(95,42): error TS2345: ... Property 'type' is missing in
+  type '{ ownerId, role, content }' but required in type 'IngestExperienceInput'
+```
+
+Fixed by adding `packages/memory/tsconfig.typecheck.json` (includes `src` and
+`scripts`, `rootDir: "."`) and pointing the package's `typecheck` script at it. The
+build config is untouched: `tsc` → exit 0, `typecheck` → exit 0, and every existing
+test script is clean.
+
+**The general lesson:** a gate is only as good as its coverage. `typecheck` looked
+like a strong gate and was checking barely half the code that mattered.
+
+## 14. Three of the four packages have no tests at all
+
+| Package | `test` script | What it really does |
+|---|---|---|
+| `packages/memory` | `tsx scripts/…` chain | 300 assertions, real coverage |
+| `apps/server` | `echo 'no tests' && exit 0` | nothing |
+| `apps/web` | `echo 'no tests' && exit 0` | nothing |
+| `packages/agents` | `echo 'no tests' && exit 0` | nothing |
+| `apps/cli` | `echo 'no tests' && exit 0` | nothing (it has one `bun:test` file that no script runs) |
+
+So for the security remediation plan, a gate that runs `pnpm run test` in those
+packages **proves nothing** — it exits 0 on an empty suite. The harness would also
+reject any item that changes source without adding a test file, and there is no
+runner for those tests to run in.
+
+This is why the security checklist starts with **S0**: give those three packages the
+repo's existing convention (plain `tsx scripts/<name>-test.ts`, no new dependency),
+and extend their `tsconfig` so the typecheck covers the test files too. S0 must
+land before the items it unblocks.
+
 ## 6. Windows specifics
 
 - `pnpm` on PATH resolves to a `.cmd` ⇒ shell execution needed for spawn.

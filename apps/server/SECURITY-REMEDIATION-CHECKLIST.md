@@ -22,7 +22,23 @@ node tools/plan-executor/plan-executor.mjs \
 Workers never edit this file. The orchestrator flips the checkboxes and writes the
 Evidence Log, so parallel item branches never conflict.
 
+**Run S0 first.** The other items need a real `test` command in the packages they
+touch, and S0 is what creates one.
+
 ---
+
+## S0 — Prerequisite: the packages under this plan have no test runner
+
+- [ ] `apps/server`, `apps/web` and `packages/agents` currently have **no automated
+      tests at all** — each `test` script is `echo 'no tests' && exit 0`, so a gate
+      that runs `pnpm run test` passes without checking anything. `packages/memory`
+      has the repo's one working convention: plain `tsx scripts/<name>-test.ts`
+      files, wired into a `test:all` script. Give these three packages the same
+      convention (no new dependency required), so that a `test` script runs real
+      checks and the other items in this plan can prove themselves with tests.
+      Extend each package's `tsconfig` so the typecheck also covers the test files
+      — `packages/memory` had the same blind spot and a test with a type error
+      passed `typecheck` and only crashed at runtime.
 
 ## S1 — Server: user routes have no authentication
 

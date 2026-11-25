@@ -122,6 +122,7 @@ function parseArgs(argv) {
     gates: null,
     recordBaseline: false,
     parent: null,
+    scope: [],
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -140,6 +141,7 @@ function parseArgs(argv) {
     else if (a === "--drop-blocked") out.keepBlocked = false;
     else if (a === "--record-baseline") out.recordBaseline = true;
     else if (a === "--parent") out.parent = next();
+    else if (a === "--scope") out.scope = next().split(",").map((s) => s.trim()).filter(Boolean);
     else if (a === "--open-only") out.includePartial = false;
     else if (a === "--help" || a === "-h") out.help = true;
   }
@@ -152,6 +154,7 @@ plan-executor — drive a checklist to completion with a team of agents
   --checklist <path>     markdown checklist (required)
   --base <branch>        branch to build on and merge into (default: main)
   --package <name>       pnpm workspace package (default: inferred from checklist path)
+  --scope <a,b>          packages an item may touch (default: the checklist's package)
   --workers <n>          items implemented in parallel (default: 2)
   --attempts <n>         implement attempts per item before giving up (default: 3)
   --only <id,id>         run only these item ids
@@ -253,23 +256,14 @@ function collectFailures(output) {
 }
 
 /**
- * Install dependencies in a worktree.
- *
- * pnpm refuses to run dependency build scripts unless they are allow-listed, and
- * it exits non-zero when it ignores one - which breaks every fresh worktree for a
- * repo that has a native dependency. Self-heal: allow the ignored packages, retry,
- * then restore the tracked file so the item's diff stays clean.
+ * Allow-list the packages pnpm refused to build, in the worktree's
+ * pnpm-workspace.yaml. The file is left patched on purpose: pnpm re-runs its
+ * install check before every script, and restoring the original content makes
+ * every later command fail again.
  */
-async function installDeps(worktree, log) {
-  const cmd = "pnpm install --frozen-lockfile --prefer-offline";
-  const run = () => execCmd(cmd, { cwd: worktree, timeout: 1_800_000 });
-  let r = await run();
-  if (r.code === 0) return { ok: true };
-
-  const output = `${r.stdout}\n${r.stderr}`;
+function allowBuildsInWorktree(worktree, output) {
   const ignored = /Ignored build scripts:\s*(.+)/i.exec(output);
-  if (!ignored) return { ok: false, output };
-
+  if (!ignored) return null;
   const names = [
     ...new Set(
       ignored[1]
@@ -278,28 +272,54 @@ async function installDeps(worktree, log) {
         .filter(Boolean),
     ),
   ];
-  log(`    install blocked by pnpm build policy for: ${names.join(", ")} - allow-listing and retrying`);
-
   const wsFile = path.join(worktree, "pnpm-workspace.yaml");
-  if (!fs.existsSync(wsFile)) return { ok: false, output };
+  if (!fs.existsSync(wsFile)) return null;
   const text = fs
     .readFileSync(wsFile, "utf8")
     .split(/\r?\n/)
     .filter((l) => !/set this to true or false/.test(l))
     .join("\n");
-  const add = names.map((n) => `  ${n}: true`).join("\n");
+  const add = names
+    .filter((n) => !new RegExp(`^\\s*${n}:`, "m").test(text))
+    .map((n) => `  ${n}: true`)
+    .join("\n");
+  if (!add) return null;
   const patched = /allowBuilds:/.test(text)
     ? text.replace(/allowBuilds:\n/, `allowBuilds:\n${add}\n`)
     : `${text}\nallowBuilds:\n${add}\n`;
   fs.writeFileSync(wsFile, patched, "utf8");
+  return "pnpm-workspace.yaml";
+}
 
+/**
+ * Install dependencies in a worktree.
+ *
+ * pnpm refuses to run dependency build scripts unless they are allow-listed, and
+ * it exits non-zero when it ignores one - which breaks every fresh worktree for a
+ * repo that has a native dependency. Self-heal: allow the ignored packages, retry.
+ *
+ * Returns the list of tracked files the harness patched, so the caller can keep
+ * them out of the item's commit.
+ */
+async function installDeps(worktree, log) {
+  const cmd = "pnpm install --frozen-lockfile --prefer-offline";
+  const run = () => execCmd(cmd, { cwd: worktree, timeout: 1_800_000 });
+  let r = await run();
+  if (r.code === 0) return { ok: true, patched: [] };
+  const output = `${r.stdout}\n${r.stderr}`;
+  const patchedFile = allowBuildsInWorktree(worktree, output);
+  if (!patchedFile) return { ok: false, output, patched: [] };
+  log("    install blocked by pnpm's build policy - allow-listing and retrying");
   r = await run();
-  await git(["checkout", "--", "pnpm-workspace.yaml"], worktree);
-  return { ok: r.code === 0, output: `${r.stdout}\n${r.stderr}` };
+  return {
+    ok: r.code === 0,
+    output: `${r.stdout}\n${r.stderr}`,
+    patched: [patchedFile],
+  };
 }
 
 async function runGates({
-  worktree, base, item, packageRoot, checklistRel, gates, baseline, onLog,
+  worktree, base, item, packageRoot, scopeRels, checklistRel, gates, baseline, onLog,
 }) {
   const failures = [];
   const notes = [];
@@ -323,19 +343,22 @@ async function runGates({
     return { failures, changed: allFiles, notes };
   }
 
-  // scope: stay inside the package, never touch the checklist, bounded file count
-  const pkgRel = path.relative(REPO_ROOT, packageRoot).replace(/\\/g, "/");
+  // scope: stay inside the scoped packages, never touch the checklist, bounded files
+  const pkgRel = scopeRels?.[0] ?? path.relative(REPO_ROOT, packageRoot).replace(/\\/g, "/");
+  const scopeSet = new Set(scopeRels?.length ? scopeRels : [pkgRel]);
   const ROOT_CONFIG_ALLOW = new Set([
     "pnpm-workspace.yaml", "package.json", "pnpm-lock.yaml", "turbo.json",
     "tsconfig.json", ".npmrc",
   ]);
+  const inScope = (f) =>
+    [...scopeSet].some((s) => f === s || f.startsWith(s + "/"));
   const outside = allFiles.filter(
-    (f) => !f.startsWith(pkgRel + "/") && f !== pkgRel && !ROOT_CONFIG_ALLOW.has(f),
+    (f) => !inScope(f) && !ROOT_CONFIG_ALLOW.has(f),
   );
   if (outside.length) {
     failures.push({
       gate: "scope",
-      detail: `changed files outside ${pkgRel}: ${outside.join(", ")}. Remove stray files or move the change inside the package.`,
+      detail: `changed files outside the scoped packages (${[...scopeSet].join(", ")}): ${outside.join(", ")}. Remove stray files or move the change inside the scope.`,
     });
   }
   const rootConfigChanged = allFiles.filter((f) => ROOT_CONFIG_ALLOW.has(f));
@@ -394,6 +417,18 @@ async function runGates({
   }
 
   // commands
+  // pnpm re-checks its install state before every script; if the worktree is
+  // not installable every command fails for a reason that has nothing to do
+  // with the item. Make it installable first.
+  const install = await installDeps(worktree, onLog ?? (() => {}));
+  if (!install.ok) {
+    failures.push({
+      gate: "command",
+      detail: `the worktree cannot be installed, so no command can be trusted:\n${install.output.split(/\r?\n/).slice(-8).join("\n")}`,
+    });
+    return { failures, changed: allFiles, notes, commandResults: [] };
+  }
+
   const results = [];
   for (const cmd of gates) {
     onLog?.(`    gate: ${cmd}`);
@@ -563,15 +598,45 @@ function parseReport(screen) {
 // worktrees
 // ---------------------------------------------------------------------------
 
+/**
+ * Create (or reuse) the item's worktree.
+ *
+ * On reuse, the worktree may have been created against an older base commit.
+ * The gate diffs are taken against `base`, so a stale worktree would report
+ * every change the base branch made since then as if the worker had made it -
+ * false scope violations. So: preserve whatever the previous run left behind,
+ * then rebase the branch onto the current base. A conflict means the item is
+ * genuinely blocked, and it is reported as such.
+ */
 async function makeWorktree(root, branch, base) {
-  // Reuse an existing worktree (a previous run may have left real work in it).
   const existing = await git(["worktree", "list", "--porcelain"], REPO_ROOT);
-  if (existing.stdout.includes(`worktree ${root.replace(/\\/g, "/")}`)) {
-    return { reused: true };
+  const known = existing.stdout.includes(`worktree ${root.replace(/\\/g, "/")}`);
+
+  if (!known) {
+    fs.mkdirSync(path.dirname(root), { recursive: true });
+    await git(["worktree", "add", "-b", branch, root, base], REPO_ROOT, 300_000);
+    return { reused: false };
   }
-  fs.mkdirSync(path.dirname(root), { recursive: true });
-  await git(["worktree", "add", "-b", branch, root, base], REPO_ROOT, 300_000);
-  return { reused: false };
+
+  // Preserve the previous run's work as a commit so the rebase can carry it.
+  await git(["add", "-A"], root);
+  const staged = await git(["diff", "--cached", "--quiet"], root);
+  if (staged.code !== 0) {
+    await git(
+      ["commit", "-m", `wip(${branch}): work preserved from a previous run`],
+      root,
+      120_000,
+    );
+  } else {
+    await git(["reset", "--quiet"], root);
+  }
+
+  const rebase = await git(["rebase", base], root, 300_000);
+  if (rebase.code !== 0) {
+    await git(["rebase", "--abort"], root);
+    return { reused: true, stale: true, conflict: rebase.stdout + rebase.stderr };
+  }
+  return { reused: true };
 }
 
 async function removeWorktree(root, branch) {
@@ -598,10 +663,10 @@ async function runItem(item, ctx) {
   fs.mkdirSync(briefDir, { recursive: true });
 
   const paths = itemPaths(item, packageRoot);
-  const allowed =
-    paths.length
-      ? paths.map((p) => path.join(packageRoot, p)).join(", ")
-      : packageRoot;
+  const scopeRoots = ctx.scopeRoots ?? [packageRoot];
+  const allowed = paths.length
+    ? paths.map((p) => path.join(packageRoot, p)).join(", ")
+    : scopeRoots.join(", ");
   const gateText = gates.join("\n");
 
   log(`  worktree: ${worktree}`);
@@ -609,8 +674,14 @@ async function runItem(item, ctx) {
 
   const wt = await makeWorktree(worktree, branch, base);
   if (wt.reused) log("  reusing the existing worktree from a previous run");
+  if (wt.conflict) {
+    log(`  could not rebase the previous run's work onto the current base:\n${wt.conflict.slice(0, 400)}`);
+    state.items[itemId] = { status: "blocked", reason: "stale worktree conflicts with the current base" };
+    return { itemId, status: "blocked" };
+  }
 
   // dependencies for the worktree (pnpm store makes this quick)
+  let patchedFiles = [];
   if (!fs.existsSync(path.join(worktree, "node_modules"))) {
     log("  installing dependencies in the worktree...");
     const install = await installDeps(worktree, log);
@@ -619,6 +690,7 @@ async function runItem(item, ctx) {
       state.items[itemId] = { status: "blocked", reason: "pnpm install failed in worktree" };
       return { itemId, status: "blocked" };
     }
+    patchedFiles = install.patched;
   }
 
   const implementer = await spawnAgent(agentName("plan", itemId), worktree, ctx.parent);
@@ -667,7 +739,7 @@ async function runItem(item, ctx) {
 
     log("  running mechanical gates...");
     const gateResult = await runGates({
-      worktree, base, item, packageRoot, checklistRel, gates,
+      worktree, base, item, packageRoot, scopeRels: ctx.scopeRels, checklistRel, gates,
       baseline: ctx.baseline, onLog: log,
     });
     lastFailures = gateResult.failures;
@@ -676,6 +748,12 @@ async function runItem(item, ctx) {
       continue;
     }
     log("  gates passed");
+
+    // Files the harness itself patched (pnpm's build policy) must not be part
+    // of the item's commit - they are environment fixes, not the worker's work.
+    for (const file of patchedFiles) {
+      await git(["checkout", "--", file], worktree);
+    }
 
     // squash the worker's work into one commit on the item branch
     await git(["add", "-A"], worktree);
@@ -782,6 +860,11 @@ async function mergeItem(result, ctx) {
   }
 
   // re-run the commands after the rebase
+  const install = await installDeps(result.worktree, log);
+  if (!install.ok) {
+    log("  post-rebase install failed");
+    return { ok: false, reason: "post-rebase install failed" };
+  }
   for (const cmd of ctx.gates) {
     const r = await execCmd(cmd, { cwd: result.worktree, timeout: 1_200_000 });
     if (r.code !== 0) {
@@ -849,9 +932,14 @@ async function main() {
     process.exit(1);
   }
   const checklistRel = path.relative(REPO_ROOT, checklistAbs).replace(/\\/g, "/");
-  const packageRoot = args.pkg
-    ? path.resolve(REPO_ROOT, args.pkg)
-    : path.resolve(path.dirname(checklistAbs));
+  // Scope: the packages an item may touch. Defaults to the checklist's own
+  // package; --scope allows a checklist that spans several packages.
+  const scopeRoots = (
+    args.scope.length
+      ? args.scope.map((s) => path.resolve(REPO_ROOT, s))
+      : [args.pkg ? path.resolve(REPO_ROOT, args.pkg) : path.resolve(path.dirname(checklistAbs))]
+  ).filter((p) => fs.existsSync(p));
+  const packageRoot = scopeRoots[0];
 
   const { items, evidenceHeading } = parseChecklist(checklistAbs);
   const selected = items.filter((i) => {
@@ -865,13 +953,17 @@ async function main() {
     fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
   );
   const pkgName = pkgJson.name;
-  const gates = args.gates ?? [
-    `pnpm --filter ${pkgName} run typecheck`,
-    `pnpm --filter ${pkgName} run lint`,
-    pkgJson.scripts?.["test:all"]
-      ? `pnpm --filter ${pkgName} run test:all`
-      : `pnpm --filter ${pkgName} run test`,
-  ];
+  // Gates: one typecheck + lint + test per package in scope.
+  const gates =
+    args.gates ??
+    scopeRoots.flatMap((root) => {
+      const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+      const out = [`pnpm --filter ${pkg.name} run typecheck`];
+      if (pkg.scripts?.lint) out.push(`pnpm --filter ${pkg.name} run lint`);
+      const testScript = pkg.scripts?.["test:all"] ?? pkg.scripts?.test;
+      if (testScript) out.push(`pnpm --filter ${pkg.name} run ${pkg.scripts?.["test:all"] ? "test:all" : "test"}`);
+      return out;
+    });
 
   const planId =
     args.planId ?? `plan-${slug(path.basename(path.dirname(checklistAbs)))}`;
@@ -942,6 +1034,8 @@ async function main() {
     args, base: baseSha, packageRoot, checklistRel, checklistAbs, gates, state,
     stateDir, ledgerFile, worktreeRoot, planId, baseline, log,
     parent: args.parent,
+    scopeRoots,
+    scopeRels: scopeRoots.map((p) => path.relative(REPO_ROOT, p).replace(/\\/g, "/")),
   };
 
   // implementation phase, N items at a time

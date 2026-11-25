@@ -902,7 +902,7 @@ async function waitForAgentReady(address, { timeout = 120_000 } = {}) {
   return false;
 }
 
-async function spawnAgent(name, cwd, parent) {
+async function spawnAgent(name, cwd, parent, extraTools = []) {
   // The harness owns these names. A previous run may still hold one, so reclaim
   // it before spawning rather than dying on "name_taken".
   try {
@@ -943,6 +943,7 @@ async function spawnAgent(name, cwd, parent) {
     "Bash(rg:*)",
     "Bash(grep:*)",
     "Bash(find:*)",
+    ...extraTools,
     "Read",
     "Edit",
     "Write",
@@ -1051,7 +1052,7 @@ function screenSincePrompt(screen, marker) {
  * that the agent finished its work: the agent's "working" state can flicker, and
  * a fresh agent can look idle before it has even picked up the prompt.
  */
-async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) {
+async function sendAndWait(address, text, { timeout = 1800, done = null, blockedHint = null } = {}) {
   await hc(["send", address, text, "--json"]);
   const deadline = Date.now() + timeout * 1000;
   // A freshly spawned agent can report "idle" for a moment before it starts.
@@ -1102,14 +1103,17 @@ async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) 
       if (blockedCommands === 3) {
         await hc(["keys", address, "esc"]);
         await sleep(1500);
-        await hc([
-          "send",
-          address,
-          "Stop running shell commands - they are blocked in this environment. " +
-            "Write the code and report the item with the trailer; the orchestrator " +
-            "runs the gates itself.",
-          "--json",
-        ]);
+        await hc(
+          [
+            "send",
+            address,
+            blockedHint ??
+              "Stop running shell commands - they are blocked in this environment. " +
+                "Write the code and report the item with the trailer; the orchestrator " +
+                "runs the gates itself.",
+            "--json",
+          ],
+        );
         await sleep(1500);
         continue;
       }
@@ -1263,20 +1267,51 @@ async function resolveRebaseConflict({ result, ctx, baseSha, log }) {
   const briefFile = path.join(dir, "resolve-conflict.md");
   fs.writeFileSync(briefFile, brief, "utf8");
 
-  const resolver = await spawnAgent(agentName("resolve", result.itemId), worktree, ctx.parent);
+  const resolver = await spawnAgent(agentName("resolve", result.itemId), worktree, ctx.parent, [
+    // The resolver has to stage the file and finish the rebase. Without these
+    // two the agent can edit the file but not complete the merge - and it
+    // cannot finish the job without them.
+    "Bash(git add:*)",
+    "Bash(git rebase:*)",
+  ]);
   const screen = await sendAndWait(
     resolver.address,
     `Read the brief at "${briefFile}" and execute it exactly. A git rebase is paused in this worktree with conflict markers in the files named in the brief - resolve every one of them and finish the rebase.`,
-    { timeout: ctx.args.turnTimeout, done: /RESOLVED:\s*(yes|no)/i },
+    {
+      timeout: ctx.args.turnTimeout,
+      done: /RESOLVED:\s*(yes|no)/i,
+      blockedHint:
+        "Stop running shell commands - they are blocked in this environment. " +
+        "Remove the conflict markers from the file with your editor so that BOTH " +
+        "sides' content survives, and report with the trailer. The orchestrator " +
+        "stages the file and finishes the rebase itself.",
+    },
   );
   const report = parseReport(screen);
   await hc(["kill", resolver.address]);
   await hc(["rm", resolver.address]);
 
   // Did it actually resolve them?
-  const stillUnmerged = (await git(["diff", "--name-only", "--diff-filter=U"], worktree)).stdout
-    .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const unmergedFiles = async () =>
+    (await git(["diff", "--name-only", "--diff-filter=U"], worktree)).stdout
+      .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+
+  let stillUnmerged = await unmergedFiles();
   if (stillUnmerged.length) {
+    // The agent may have removed the conflict markers but been unable to stage
+    // the file. If the working copy is clean of markers, the harness finishes
+    // the job itself rather than throwing the resolution away.
+    const markers = await git(["grep", "-n", "-E", "^<<<<<<< |^>>>>>>> |^=======$"], worktree);
+    const hasMarkers = markers.code === 0 && markers.stdout.trim().length > 0;
+    if (!hasMarkers) {
+      log("    the resolver removed the markers but could not stage them - staging here");
+      for (const f of stillUnmerged) await git(["add", "--", f], worktree);
+      stillUnmerged = await unmergedFiles();
+    }
+  }
+  if (stillUnmerged.length) {
+    const tail = (report.tail ?? []).slice(-25).join("\n");
+    log(`    the resolver's last words:\n${tail}`);
     return {
       ok: false,
       reason: `the conflict was not resolved (still unmerged: ${stillUnmerged.join(", ")})`,
@@ -1705,6 +1740,11 @@ async function mergeItem(result, ctx) {
 
   let merged = false;
   let resolvedConflict = false;
+  // The recorded head can be stale (a previous run may have rebased the
+  // branch already), and a conflict resolution reads the branch's version of a
+  // file from it - so take it from the branch itself.
+  const branchHead = (await git(["rev-parse", result.branch], REPO_ROOT)).stdout.trim();
+  if (branchHead) result.head = branchHead;
   for (let attempt = 1; attempt <= 2 && !merged; attempt++) {
     const baseSha = (await git(["rev-parse", baseRef], REPO_ROOT)).stdout.trim();
     log(`  merging onto ${baseRef} @ ${baseSha.slice(0, 7)}`);

@@ -286,6 +286,170 @@ check(
 );
 
 // ---------------------------------------------------------------------------
+// the brief's own example must not be read as the worker's report
+// ---------------------------------------------------------------------------
+//
+// The worker is told to read the brief, and the brief contains the report
+// format. When it reads it, that text is on screen - and the harness reads
+// the report off the screen. So the brief has to be subtracted from the
+// screen before anything is read out of it.
+
+const briefText = [
+  "## How to report",
+  "",
+  "```",
+  "ITEM: p0-7-policy-settings-that-still-have-no--01",
+  "STATUS: <done or blocked>",
+  "ITEM_STATE: <complete or partial>",
+  "CHANGED: <comma-separated list of the files you changed>",
+  "```",
+  "",
+  "Write `STATUS: done` (and not the placeholder) when the work is finished.",
+].join("\n");
+
+const briefEcho = [
+  "Read the brief at \"C:\\\\tmp\\\\fix.md\" and execute it exactly.",
+  "  ● Read 1 file",
+  "  ⎿  C:\\tmp\\fix.md",
+  ...briefText.split("\n").map((l) => (l ? `  ${l}` : "")),
+].join("\n");
+
+check(
+  "the brief's example is not a report trailer",
+  hasTrailer(briefEcho, /STATUS:\s*(done|blocked)/i, { ignoreText: briefText }),
+  false,
+);
+
+check(
+  "without the subtraction the brief's example would be read as a trailer",
+  hasTrailer(briefEcho, /STATUS:\s*(done|blocked)/i),
+  true,
+);
+
+check(
+  "a real trailer at the end of the turn is found",
+  hasTrailer(
+    [
+      "  ● Reading 1 file…",
+      "  ⎿  packages/memory/src/storage/db.ts",
+      "  ITEM: p0-7-policy-settings-that-still-have-no--01",
+      "  STATUS: done",
+      "  ITEM_STATE: complete",
+      "  ✻ Baked for 4m 6s · done",
+      "  ──────────────────────────",
+      "  ❯ ",
+      "  ──────────────────────────",
+      "    ⏵⏵ auto mode on (shift+tab to cycle)",
+    ].join("\n"),
+    /STATUS:\s*(done|blocked)/i,
+  ),
+  true,
+);
+
+check(
+  "the report of a real turn is read, not the brief's example",
+  parseReport(
+    [
+      "  STATUS: done",
+      "  ITEM_STATE: complete",
+      "  CHANGED: packages/memory/src/governance/policy.ts",
+      "  TESTS:",
+      "  pnpm --filter @workspace/memory run typecheck exited 0",
+      "  pnpm --filter @workspace/memory run test:all exited 1",
+      "  ✻ Baked for 4m 6s · done",
+    ].join("\n"),
+  ).tests,
+  "pnpm --filter @workspace/memory run typecheck exited 0 | pnpm --filter @workspace/memory run test:all exited 1",
+);
+
+check(
+  "a brief on screen alone yields no status",
+  parseReport(briefEcho, { ignoreText: briefText }).status,
+  null,
+);
+
+check(
+  "the worker's own report still reads when the brief is on screen too",
+  parseReport(
+    [
+      ...briefEcho.split("\n"),
+      "  ● Reading 1 file…",
+      "  ITEM: p0-7-policy-settings-that-still-have-no--01",
+      "  STATUS: done",
+      "  ITEM_STATE: partial",
+      "  REMAINING: the read path is not wired",
+    ].join("\n"),
+    { ignoreText: briefText },
+  ).itemState,
+  "partial",
+);
+
+check(
+  "a wrapped brief line is subtracted too",
+  parseReport(
+    [
+      "  Write `STATUS: done` (and not the placeholder) when the work is",
+      "  finished.",
+      "  ● Reading 1 file…",
+    ].join("\n"),
+    { ignoreText: briefText },
+  ).status,
+  null,
+);
+
+// ---------------------------------------------------------------------------
+// no brief may be read as a report
+// ---------------------------------------------------------------------------
+//
+// The harness reads the report off the screen, and the brief is on the screen
+// once the worker has read it. A brief that contains the report format can
+// therefore be read as the report. The subtraction is the fix; this is the
+// guarantee that the subtraction actually covers every line of every brief -
+// including the lines that only look harmless.
+
+const BRIEF_DIR = path.join(HERE, "briefs");
+const briefFiles = fs.readdirSync(BRIEF_DIR).filter((f) => f.endsWith(".md"));
+check("the briefs are there to check", briefFiles.length > 0, true);
+
+for (const file of briefFiles) {
+  const text = fs.readFileSync(path.join(BRIEF_DIR, file), "utf8");
+  // The screen as the terminal shows the file being read: every line indented
+  // by two spaces, exactly as the Read tool renders it.
+  const screen = text
+    .split(/\r?\n/)
+    .map((l) => (l.trim() ? `  ${l}` : ""))
+    .join("\n");
+  const report = parseReport(screen, { ignoreText: text });
+  const read = {
+    status: report.status,
+    itemState: report.itemState,
+    verdict: report.verdict,
+    resolved: report.resolved,
+    itemText: report.itemText,
+    changed: report.changed,
+    tests: report.tests,
+    remaining: report.remaining,
+    blocked: report.blocked,
+    reasons: report.reasons,
+    conflicts: report.conflicts,
+  };
+  const said = Object.entries(read).filter(([, v]) => v !== null);
+  check(`the brief ${file} on screen reads as no report at all`, said, []);
+}
+
+// And the same for a brief that is only partly on screen - the worker read
+// the first half of it.
+const splitBrief = fs.readFileSync(path.join(BRIEF_DIR, "implement.md"), "utf8");
+const half = splitBrief.split(/\r?\n/).slice(0, 40).join("\n");
+check(
+  "half a brief on screen reads as no report either",
+  parseReport(half.split(/\r?\n/).map((l) => `  ${l}`).join("\n"), {
+    ignoreText: splitBrief,
+  }).status,
+  null,
+);
+
+// ---------------------------------------------------------------------------
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exit(failures ? 1 : 0);

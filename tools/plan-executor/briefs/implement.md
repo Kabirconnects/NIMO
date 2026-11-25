@@ -88,7 +88,8 @@ TESTS: <one line per gate command with its exit code, e.g. "typecheck => exit 0"
 ```
 
 The angle brackets are placeholders - replace each one with the real value.
-Write `STATUS: done` (and not the placeholder) when the work is finished.
+On the STATUS line, write the word `done` when the work is finished, or
+`blocked` when it could not be finished.
 
 `ITEM_STATE: complete` means the item is fully satisfied now.
 `ITEM_STATE: partial` means you closed part of the gap but something still stands in the

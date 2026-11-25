@@ -68,5 +68,5 @@ CONFLICTS: <one short line per conflict: what it was, and how you combined the t
 ```
 
 The angle brackets are placeholders - replace each one with the real value.
-Write `RESOLVED: yes` (and not the placeholder) when every conflict is resolved
+On the RESOLVED line, write the word `yes` when every conflict is resolved
 and the rebase is finished.

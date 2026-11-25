@@ -1249,9 +1249,41 @@ async function unstick(address) {
   return dismissModal(address, modal);
 }
 
+/**
+ * Remove the harness's own brief from a screen.
+ *
+ * The worker is told to read the brief, and the brief contains the report
+ * format. When the worker reads it, that text is ON SCREEN - and the report is
+ * read off the screen. So the brief's own example of "STATUS: done" was read
+ * as the worker's report: the harness ended the turn while the worker was
+ * still working, and judged a worktree that was changing under it.
+ *
+ * The brief is the harness's own file, so it can be subtracted. A line is
+ * removed when it starts with a line of the brief - a prefix match, because
+ * the terminal wraps long lines and the wrapped remainder of a brief line no
+ * longer equals it. What is left is what the worker said.
+ */
+function stripBrief(screen, briefText) {
+  if (!briefText) return screen;
+  const prefixes = briefText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length >= 8);
+  if (!prefixes.length) return screen;
+  return screen
+    .split(/\r?\n/)
+    .filter((l) => {
+      const t = l.trim();
+      if (t.length < 8) return true;
+      return !prefixes.some((p) => t.startsWith(p) || p.startsWith(t));
+    })
+    .join("\n");
+}
+
 /** Is the report trailer visible near the end of the screen? */
-function hasTrailer(screen, regex) {
-  const lines = screen.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+function hasTrailer(screen, regex, { ignoreText = null } = {}) {
+  const clean = stripBrief(screen, ignoreText);
+  const lines = clean.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   // The window is small on purpose. The brief the worker reads contains the
   // report format - and when the worker reads the brief, that text is ON
   // SCREEN. A wide window finds "STATUS: done" in the brief's own example and
@@ -1282,7 +1314,7 @@ function screenSincePrompt(screen, marker) {
  * that the agent finished its work: the agent's "working" state can flicker, and
  * a fresh agent can look idle before it has even picked up the prompt.
  */
-async function sendAndWait(address, text, { timeout = 1800, done = null, blockedHint = null, onLog = null } = {}) {
+async function sendAndWait(address, text, { timeout = 1800, done = null, blockedHint = null, onLog = null, ignoreText = null } = {}) {
   const started = Date.now();
   const sent = await hc(["send", address, text, "--json"]);
   // A send that fails is not a turn: the agent never sees the brief, and the
@@ -1310,7 +1342,7 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
 
     const screen = await readScreen(address);
     const current = screenSincePrompt(screen, marker);
-    if (done && hasTrailer(current, done)) {
+    if (done && hasTrailer(current, done, { ignoreText })) {
       // A trailer while the agent is still working is not a trailer: it is the
       // brief's own example, or text the agent is quoting. An agent that is
       // still working has not finished its report, so the turn has not ended.
@@ -1411,8 +1443,9 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
   }
 }
 
-function parseReport(screen) {
-  const lines = screen.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+function parseReport(screen, { ignoreText = null } = {}) {
+  const clean = stripBrief(screen, ignoreText);
+  const lines = clean.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const tail = lines.slice(-120);
   const joined = tail.join("\n");
   // Return the capture group of the last match, so "VERDICT: PASS" yields
@@ -1439,6 +1472,8 @@ function parseReport(screen) {
         continue;
       }
       if (/^[A-Z_]{3,}:/.test(t)) break;
+      // The terminal's own chrome is not part of the report.
+      if (/^[✻●⎿─❯⏵]/.test(t)) break;
       out.push(t);
     }
     return out.length ? out.join(" | ") : null;
@@ -1547,9 +1582,9 @@ async function runIndependentReview({
   const reviewScreen = await sendAndWait(
     reviewer.address,
     `Read the review brief at "${reviewFile}" and execute it exactly. The diff to review is at "${reviewVars.DIFF_FILE}". Review the diff for item ${itemId}.`,
-    { timeout: ctx.args.turnTimeout, done: /VERDICT:\s*(PASS|FAIL)/i, onLog: log },
+    { timeout: ctx.args.turnTimeout, done: /VERDICT:\s*(PASS|FAIL)/i, onLog: log, ignoreText: reviewBrief },
   );
-  const verdict = parseReport(reviewScreen);
+  const verdict = parseReport(reviewScreen, { ignoreText: reviewBrief });
   await hc(["kill", reviewer.address]);
   await hc(["rm", reviewer.address]);
   return { verdict, diffFile: reviewVars.DIFF_FILE, agent: reviewer.address };
@@ -1635,6 +1670,7 @@ async function resolveRebaseConflict({ result, ctx, baseSha, log }) {
       timeout: ctx.args.turnTimeout,
       done: /RESOLVED:\s*(yes|no)/i,
       onLog: log,
+      ignoreText: brief,
       blockedHint:
         "Stop running shell commands - they are blocked in this environment. " +
         "Remove the conflict markers from the file with your editor so that BOTH " +
@@ -1642,7 +1678,7 @@ async function resolveRebaseConflict({ result, ctx, baseSha, log }) {
         "stages the file and finishes the rebase itself.",
     },
   );
-  const report = parseReport(screen);
+  const report = parseReport(screen, { ignoreText: brief });
   await hc(["kill", resolver.address]);
   await hc(["rm", resolver.address]);
 
@@ -2048,8 +2084,9 @@ async function runItem(item, ctx) {
       timeout: args.turnTimeout,
       done: /STATUS:\s*(done|blocked)/i,
       onLog: log,
+      ignoreText: brief,
     });
-    const report = parseReport(screen);
+    const report = parseReport(screen, { ignoreText: brief });
 
     if (report.status === null) {
       log(`  note: the worker did not end with a status trailer - judging the diff alone`);
@@ -2646,4 +2683,6 @@ export {
   applyItemOutcome,
   findItemLine,
   agentName,
+  parseReport,
+  hasTrailer,
 };

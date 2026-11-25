@@ -99,7 +99,8 @@ TESTS: <one line per gate command with its exit code>
 ```
 
 The angle brackets are placeholders - replace each one with the real value.
-Write `STATUS: done` (and not the placeholder) when the work is finished.
+On the STATUS line, write the word `done` when the work is finished, or
+`blocked` when it could not be finished.
 
 If the item is only partly satisfied, add `REMAINING: <what still stands in the way>`.
 

@@ -12,10 +12,10 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
-    "test": "echo 'no tests' && exit 0",
+    "test": "tsx scripts/agents-test.ts",
     "ci": "npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {

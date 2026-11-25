@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "lint": "oxlint",
     "format": "prettier --write \"**/*.{ts,tsx,json,css}\"",
-    "typecheck": "tsc --noEmit",
-    "test": "echo 'no tests' && exit 0",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "tsx scripts/web-test.ts",
     "ci": "npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {
@@ -34,6 +34,7 @@
     "tailwindcss": "^4",
     "typescript": "~7.0.2",
     "vite": "^8.3.6",
+    "tsx": "latest",
     "vite-tsconfig-paths": "^6.1.1"
   }
 }

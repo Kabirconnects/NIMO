@@ -1145,36 +1145,66 @@ async function runItem(item, ctx) {
 // ---------------------------------------------------------------------------
 
 async function mergeItem(result, ctx) {
-  const { base, log, checklistAbs, checklistRel, item, planId } = ctx;
-  const baseSha = (await git(["rev-parse", base])).stdout.trim();
+  const { baseRef, log, checklistAbs, checklistRel, item, planId } = ctx;
 
-  // rebase onto the current base (other items may have merged first)
-  const rebase = await git(["rebase", baseSha], result.worktree, 300_000);
-  if (rebase.code !== 0) {
-    await git(["rebase", "--abort"], result.worktree);
-    log(`  rebase conflict -> item blocked`);
-    return { ok: false, reason: "rebase conflict" };
+  // The merge must land on the base branch, and that branch moves while the
+  // run is in progress: every merged item adds a commit, and so does anything
+  // else that touches the repo. So the tip is resolved FRESH here.
+  //
+  // Resolving the startup SHA again would be a no-op rebase - the item would
+  // stay on the old base and the fast-forward merge would fail with
+  // "Not possible to fast-forward".
+  const onBranch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], REPO_ROOT)).stdout.trim();
+  const baseIsSha = /^[0-9a-f]{7,40}$/i.test(baseRef);
+  if (!baseIsSha && onBranch !== baseRef) {
+    log(`  refusing to merge: HEAD is on "${onBranch}", not the base branch "${baseRef}"`);
+    return { ok: false, reason: `not on the base branch (${onBranch} != ${baseRef})` };
   }
 
-  // re-run the commands after the rebase
-  const install = await installDeps(result.worktree, log, ctx.stateDir);
-  if (!install.ok) {
-    log("  post-rebase install failed");
-    return { ok: false, reason: "post-rebase install failed" };
-  }
-  for (const cmd of ctx.gates) {
-    const r = await execCmd(cmd, { cwd: result.worktree, timeout: 1_200_000 });
-    if (r.code !== 0) {
-      log(`  post-rebase gate failed: ${cmd}`);
-      return { ok: false, reason: `post-rebase gate failed: ${cmd}` };
+  let merged = false;
+  for (let attempt = 1; attempt <= 2 && !merged; attempt++) {
+    const baseSha = (await git(["rev-parse", baseRef], REPO_ROOT)).stdout.trim();
+    log(`  merging onto ${baseRef} @ ${baseSha.slice(0, 7)}`);
+
+    // rebase onto the current base (other items may have merged first)
+    const rebase = await git(["rebase", baseSha], result.worktree, 300_000);
+    if (rebase.code !== 0) {
+      await git(["rebase", "--abort"], result.worktree);
+      log(`  rebase conflict -> item blocked`);
+      return { ok: false, reason: "rebase conflict" };
     }
-  }
 
-  const merge = await git(["merge", "--ff-only", result.branch], REPO_ROOT, 120_000);
-  if (merge.code !== 0) {
+    // re-run the commands after the rebase
+    const install = await installDeps(result.worktree, log, ctx.stateDir);
+    if (!install.ok) {
+      log("  post-rebase install failed");
+      return { ok: false, reason: "post-rebase install failed" };
+    }
+    for (const cmd of ctx.gates) {
+      const r = await execCmd(cmd, { cwd: result.worktree, timeout: 1_200_000 });
+      if (r.code !== 0) {
+        log(`  post-rebase gate failed: ${cmd}`);
+        return { ok: false, reason: `post-rebase gate failed: ${cmd}` };
+      }
+    }
+
+    const merge = await git(["merge", "--ff-only", result.branch], REPO_ROOT, 120_000);
+    if (merge.code === 0) {
+      merged = true;
+      break;
+    }
+
+    // The base moved between the rebase and the merge (another item merged, or
+    // something else committed). Resolve the new tip and try once more.
+    const tip = (await git(["rev-parse", baseRef], REPO_ROOT)).stdout.trim();
+    if (attempt === 1 && tip !== baseSha) {
+      log(`  the base moved during the merge (${baseSha.slice(0, 7)} -> ${tip.slice(0, 7)}) - retrying`);
+      continue;
+    }
     log(`  merge failed: ${merge.stdout}${merge.stderr}`);
     return { ok: false, reason: "merge failed" };
   }
+  if (!merged) return { ok: false, reason: "merge failed" };
 
   // the orchestrator owns the checklist and the evidence log
   const lines = fs.readFileSync(checklistAbs, "utf8").split(/\r?\n/);
@@ -1336,7 +1366,11 @@ async function main() {
 
   const baseSha = (await git(["rev-parse", args.base])).stdout.trim();
   const ctx = {
-    args, base: baseSha, packageRoot, checklistRel, checklistAbs, gates, state,
+    // `base` is the SHA the run started from (the diffs are taken against it);
+    // `baseRef` is the branch it points at. The branch moves during a run, so
+    // the merge phase resolves the tip of `baseRef` again before it merges.
+    args, base: baseSha, baseRef: args.base,
+    packageRoot, checklistRel, checklistAbs, gates, state,
     stateDir, ledgerFile, worktreeRoot, planId, baseline, log,
     parent: args.parent,
     scopeRoots,

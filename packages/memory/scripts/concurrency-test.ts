@@ -204,20 +204,31 @@ await Promise.all([
 
 check(txError === null, "[ATOMIC] interleaved transactional writers never throw");
 
+// The degree consistency check must run BEFORE any repair: after
+// repairGraphDegrees() the assertion is true by construction and would prove
+// nothing about the concurrent writes.
+const degreeMismatchQuery = `SELECT COUNT(*) AS n FROM memories m
+   WHERE m.owner_id = ?
+     AND m.graph_degree != (
+       SELECT COUNT(*) FROM memory_edges e
+       WHERE e.owner_id = m.owner_id
+         AND (e.from_memory_id = m.id OR e.to_memory_id = m.id)
+     )`;
+
+const beforeRepair = getDb().prepare(degreeMismatchQuery).get(txOwner) as { n: number };
+check(
+  Number(beforeRepair.n) === 0,
+  "[ATOMIC] graph degree stays consistent under concurrent transactional writes",
+  `${beforeRepair.n} mismatched before any repair`,
+);
+
 repairGraphDegrees(txOwner);
-const mismatch = (getDb()
-  .prepare(
-    `SELECT COUNT(*) AS n FROM memories m
-     WHERE m.owner_id = ?
-       AND m.graph_degree != (
-         SELECT COUNT(*) FROM memory_edges e
-         WHERE e.owner_id = m.owner_id
-           AND (e.from_memory_id = m.id OR e.to_memory_id = m.id)
-       )`,
-  )
-  .get(txOwner) as { n: number });
-check(Number(mismatch.n) === 0, "[ATOMIC] graph degree is consistent after concurrent transactional writes",
-  `${mismatch.n} mismatched`);
+const afterRepair = getDb().prepare(degreeMismatchQuery).get(txOwner) as { n: number };
+check(
+  Number(afterRepair.n) === 0,
+  "[ATOMIC] graph degree is consistent after the repair pass",
+  `${afterRepair.n} mismatched`,
+);
 
 const txMemCount = (getDb()
   .prepare("SELECT COUNT(*) AS n FROM memories WHERE owner_id = ?")

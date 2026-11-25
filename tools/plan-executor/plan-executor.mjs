@@ -1370,7 +1370,7 @@ function screenSincePrompt(screen, marker) {
  * that the agent finished its work: the agent's "working" state can flicker, and
  * a fresh agent can look idle before it has even picked up the prompt.
  */
-async function sendAndWait(address, text, { timeout = 1800, done = null, blockedHint = null, onLog = null, ignoreText = null } = {}) {
+async function sendAndWait(address, text, { timeout = 1800, done = null, blockedHint = null, onLog = null, ignoreText = null, outcome = null } = {}) {
   const started = Date.now();
   const sent = await hc(["send", address, text, "--json"]);
   // A send that fails is not a turn: the agent never sees the brief, and the
@@ -1436,6 +1436,24 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
     // then would cut the turn short.
     const screenTail = current.split(/\r?\n/).slice(-12).join("\n");
     if (/API Error:/i.test(screenTail)) {
+      // A rate limit is not a transient error. The provider says when it
+      // resets - and we saw "reset after 9h 21m 51s" - so retrying is not
+      // patience, it is waste: the harness would burn every attempt of every
+      // item against a wall that is nine hours away. Say what it is and stop.
+      const rateLimit = /\b429\b|rate limit|Free usage limit reached/i.test(screenTail);
+      const resetMatch = /reset after\s+([\dhms ]+?)(?:\)|$|\s*·)/i.exec(screenTail);
+      const resetIn = resetMatch ? resetMatch[1].trim() : null;
+      if (rateLimit) {
+        const message =
+          `the model provider is rate-limited` +
+          (resetIn ? ` for ${resetIn}` : "") +
+          ` - no worker can run until it resets`;
+        onLog?.(`    ${message}`);
+        if (outcome) {
+          outcome.apiFailure = { kind: "rate-limit", message, resetIn };
+        }
+        return current;
+      }
       apiErrors++;
       if (apiErrors <= 4) {
         // The backoff grows: a gateway that is up in a moment and a gateway
@@ -1448,7 +1466,11 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
         await sleep(wait);
         continue;
       }
-      onLog?.(`    the model API failed four times - giving up on this turn`);
+      const message = "the model API failed four times - the worker never ran";
+      onLog?.(`    ${message}`);
+      if (outcome) {
+        outcome.apiFailure = { kind: "error", message, resetIn: null };
+      }
       return current;
     }
 
@@ -2236,7 +2258,16 @@ async function runItem(item, ctx) {
     }
   }
 
-  for (let attempt = startAttempt; attempt <= args.attempts; attempt++) {
+  let apiFailures = 0;
+  let providerBlock = null;
+  let turn = 0;
+  // `attempt` is the budget - how many real turns the worker gets. `turn` is
+  // how many times an agent was spawned. They differ when a turn never
+  // happened: a model API failure is not the worker's turn, and burning the
+  // budget on it is how an item was reported as "the gates rejected it" three
+  // times without a single line of code being written.
+  for (let attempt = startAttempt; attempt <= args.attempts; ) {
+    turn++;
     // A fresh agent per attempt.
     //
     // The previous agent's screen still carries its last report trailer, and
@@ -2252,10 +2283,10 @@ async function runItem(item, ctx) {
     if (implementer) {
       await hc(["kill", implementer.address]);
       await hc(["rm", implementer.address]);
+      implementer = null;
     }
-    implementer = await spawnAgent(agentName("plan", itemId, attempt), worktree, ctx.parent);
+    implementer = await spawnAgent(agentName("plan", itemId, turn), worktree, ctx.parent);
     log(`  implementer: ${implementer.address}`);
-
     const template = fs.readFileSync(
       path.join(BRIEFS, attempt === 1 ? "implement.md" : "fix.md"),
       "utf8",
@@ -2282,13 +2313,37 @@ async function runItem(item, ctx) {
       `Read the brief at "${briefFile}" and execute it exactly. ` +
       `Checklist item ${itemId}: ${item.text}. ` +
       `Work only inside ${worktree}.`;
+    const outcome = {};
     const screen = await sendAndWait(implementer.address, pointer, {
       timeout: args.turnTimeout,
       done: /STATUS:\s*(done|blocked)/i,
       onLog: log,
       ignoreText: brief,
+      outcome,
     });
     const report = parseReport(screen, { ignoreText: brief });
+
+    // The provider failed, so the worker never ran. This is not the item's
+    // turn: the attempt budget is untouched, nothing is judged, and the
+    // reason recorded is the provider's, not the worker's.
+    if (outcome.apiFailure) {
+      apiFailures++;
+      try {
+        fs.writeFileSync(path.join(briefDir, `turn-${turn}.screen.txt`), screen, "utf8");
+      } catch {
+        /* the screen is a nicety, not a requirement */
+      }
+      if (outcome.apiFailure.kind === "rate-limit") {
+        providerBlock = outcome.apiFailure;
+        break;
+      }
+      if (apiFailures >= 3) {
+        lastFailures = [{ gate: "provider", detail: outcome.apiFailure.message }];
+        break;
+      }
+      await sleep(20_000 * apiFailures);
+      continue;
+    }
 
     if (report.status === null) {
       log(`  note: the worker did not end with a status trailer - judging the diff alone`);
@@ -2307,6 +2362,7 @@ async function runItem(item, ctx) {
       lastBlockReason = reason;
       lastFailures = [{ gate: "worker", detail: `worker reported blocked: ${reason}` }];
       log(`  worker reported blocked: ${reason}`);
+      attempt++;
       continue;
     }
 
@@ -2354,10 +2410,11 @@ async function runItem(item, ctx) {
         }
       }
       try {
-        fs.writeFileSync(path.join(briefDir, `attempt-${attempt}.screen.txt`), screen, "utf8");
+        fs.writeFileSync(path.join(briefDir, `attempt-${turn}.screen.txt`), screen, "utf8");
       } catch {
         /* the screen is a nicety, not a requirement */
       }
+      attempt++;
       continue;
     }
     log("  gates passed");
@@ -2398,6 +2455,7 @@ async function runItem(item, ctx) {
       log(`  review failed: ${lastFailures[0].detail.slice(0, 160)}`);
       // let the implementer try again from the committed state
       await git(["reset", "--hard", head], worktree);
+      attempt++;
       continue;
     }
     log("  review PASSED");
@@ -2426,9 +2484,32 @@ async function runItem(item, ctx) {
     break;
   }
 
+  if (providerBlock) {
+    // Nothing was learned about this item: the provider refused to run a
+    // worker. The worktree is left exactly as it was, the item stays open,
+    // and the reason says so in those words - never "the gates rejected it".
+    if (implementer) {
+      await hc(["kill", implementer.address]);
+      await hc(["rm", implementer.address]);
+    }
+    state.items[itemId] = {
+      status: "provider-blocked",
+      reason: providerBlock.message,
+      worktree,
+      branch,
+    };
+    return {
+      itemId,
+      status: "provider-blocked",
+      failures: [{ gate: "provider", detail: providerBlock.message }],
+    };
+  }
+
   if (result.status !== "ready") {
-    await hc(["kill", implementer.address]);
-    await hc(["rm", implementer.address]);
+    if (implementer) {
+      await hc(["kill", implementer.address]);
+      await hc(["rm", implementer.address]);
+    }
     state.items[itemId] = {
       status: "blocked",
       failures: lastFailures,
@@ -2642,10 +2723,16 @@ async function recordBlockedItems(entries, ctx) {
       .join(" | ")
       .replace(/\s+/g, " ")
       .slice(0, 300);
+    // "The gates rejected the code" and "no worker could run" are different
+    // facts, and a log that says the first when it means the second is worse
+    // than no log: it reads as evidence that the code was tried.
+    const outcome =
+      entry.status === "provider-blocked"
+        ? `NOT ATTEMPTED — no worker could run (${why || "the model provider failed"})`
+        : `NOT COMPLETED — the gates did not pass, so nothing was merged: ${why || "no reason recorded"}`;
     const line =
       `- ${today} — ${entry.item.id}: ${entry.item.text.slice(0, 90)} ` +
-      `(NOT COMPLETED — the gates did not pass, so nothing was merged: ` +
-      `${why || "no reason recorded"}; the item stays open).`;
+      `(${outcome}; the item stays open).`;
     const existing = lines.findIndex(
       (l, i) => i > evidenceIdx && l.includes(`— ${entry.item.id}:`),
     );
@@ -2881,6 +2968,17 @@ async function main() {
       results.push(...batchResults);
       log("\n=== merge phase ===");
       await mergeBatch(batchResults, ctx);
+      // Every item needs a worker from the same provider. If it is
+      // rate-limited, the next item will fail exactly the same way - so the
+      // run stops here instead of burning the rest of the checklist against
+      // a wall that is hours away.
+      if (batchResults.some((r) => r.status === "provider-blocked")) {
+        log(
+          "\n=== stopping: the model provider is not serving workers ===\n" +
+            "  nothing was attempted for the remaining items - they are untouched",
+        );
+        break;
+      }
     }
   }
 
@@ -2890,7 +2988,13 @@ async function main() {
 
   const done = Object.values(state.items).filter((s) => s.status === "done").length;
   const blocked = Object.values(state.items).filter((s) => s.status === "blocked").length;
-  log(`\nsummary: ${done} merged, ${blocked} blocked`);
+  const unattempted = Object.values(state.items).filter(
+    (s) => s.status === "provider-blocked",
+  ).length;
+  log(
+    `\nsummary: ${done} merged, ${blocked} blocked` +
+      (unattempted ? `, ${unattempted} never attempted (the provider was not serving)` : ""),
+  );
   log(`state:   ${stateFile}`);
 }
 

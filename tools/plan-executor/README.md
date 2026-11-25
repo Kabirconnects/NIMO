@@ -112,8 +112,10 @@ node tools/plan-executor/selftest.mjs
 The harness decides where the worker should look and what an item actually is.
 Those two decisions are worth checking on their own, so they are: the
 self-test covers the path resolution (a checklist that spans several packages
-has no single "its" package) and the checklist parsing (item ids, multi-line
-items, item state).
+has no single "its" package), the checklist parsing (item ids, multi-line
+items, item state), and the reading of the worker's report off the screen —
+including that the brief, the item text and the terminal's own chrome cannot
+be mistaken for it.
 
 ## Item ids
 
@@ -162,12 +164,40 @@ These are not hypothetical - each one broke a real run before it was fixed.
   still working — the worker is then never given the time to act on the failure
   list it was handed. Only the screen *after* the echoed prompt is read.
 - **The base branch moves while the run is in progress.** Every merged item
-  adds a commit. The merge phase therefore resolves the base branch's tip
-  fresh; resolving the SHA captured at startup would rebase onto a stale base
-  and the fast-forward merge would fail. The gates, on the other hand, diff
-  against the base SHA captured at startup — so a commit you make to `main`
+  adds a commit. Each item's branch is therefore cut from the tip of the base
+  branch **at the moment that item starts**, and the gates diff against that
+  commit — so the diff is exactly the item's work, a commit you make to `main`
   while the run is going does not turn your files into "worker changes" and
-  fail the scope gate. The merge still picks it up.
+  fail the scope gate, and an item that starts after the previous one merged
+  does not have to be rebased at all. Items are implemented and merged a batch
+  at a time (a batch is `--workers` items), so a batch starts from the code the
+  previous batch merged. Implementing everything first and merging afterwards
+  meant every item was written against one commit: every item conflicted with
+  every other one.
+- **The brief is on the screen, and the report is read off the screen.** The
+  worker is told to read the brief, and the brief contains the report format —
+  so the harness found "STATUS: done" in the brief's own example, ended the
+  turn while the worker was **still working**, and ran the gates against a
+  worktree that was changing under them. The harness now subtracts the brief
+  it wrote from the screen before reading anything out of it, and the brief's
+  placeholders are inert. The item's text is on the screen too, and it is
+  prose: the report's field names are matched case-sensitively, because the
+  P0.7 item says a method "must return `{ changed: false }`" and a
+  case-insensitive read took that for the worker's list of changed files.
+- **A 503 from the model API is not the worker's fault.** An API error ends
+  the turn with an error instead of a report, and the worker never got to do
+  anything — the harness judged the worktree it never touched, and the item
+  burned all three attempts. A turn that ends in a 503 is sent again instead.
+  Only the end of the screen counts, so a 503 Claude Code recovered from by
+  itself does not cut the turn short.
+- **A worker that never read its output will claim it passed.** One worker ran
+  the full suite, got "Error: Exit code 1" with the output collapsed to
+  "… +204 lines", never saw which assertions failed, changed nothing, and
+  reported "test:all exited 0". The gates caught it. The brief now tells the
+  worker to run the failing script on its own — the suite's output is
+  collapsed, and a failing assertion is invisible in it — and the harness
+  logs the worker's claim next to the gate's verdict when they contradict
+  each other.
 - **A proof that cannot load is not always inconclusive.** A test that imports
   a module the old code does not have is a proof — it cannot run without the
   change. So is a test that calls a function the change *adds*: against the old
@@ -247,6 +277,11 @@ true — and a ticked item whose text says the feature is missing is worse than 
 unticked one. The worker therefore reports `ITEM_TEXT: <the item's wording after
 your change>` and the orchestrator, which owns the checklist file, writes it. The
 worker never edits the checklist itself.
+
+An item that could not be completed keeps its box and gets a line in the
+Evidence Log anyway, saying what failed. "We looked and could not" has to be
+distinguishable from "nobody looked" — and the item's own text is the gap, so
+the log line is the reason it is still open.
 
 
 - Items that must land in sequence (item B depends on A's API) should be run with

@@ -139,6 +139,7 @@ function parseArgs(argv) {
     else if (a === "--turn-timeout") out.turnTimeout = Number(next());
     else if (a === "--gates") out.gates = next().split(";").map((s) => s.trim()).filter(Boolean);
     else if (a === "--drop-blocked") out.keepBlocked = false;
+    else if (a === "--merge-only") out.mergeOnly = true;
     else if (a === "--record-baseline") out.recordBaseline = true;
     else if (a === "--parent") out.parent = next();
     else if (a === "--scope") out.scope = next().split(",").map((s) => s.trim()).filter(Boolean);
@@ -163,6 +164,8 @@ plan-executor — drive a checklist to completion with a team of agents
   --turn-timeout <sec>   max wait per agent turn (default: 1800)
   --open-only            only items marked [ ] (skip [~] partial ones)
   --drop-blocked         delete worktrees of blocked items (default: keep them)
+  --merge-only           merge items that already passed every gate and the
+                         reviewer, without spawning a worker (recovery path)
   --dry-run              parse and print the plan, change nothing
 `;
 
@@ -1109,6 +1112,9 @@ async function runItem(item, ctx) {
     result = {
       itemId,
       status: "ready",
+      // Recorded so a later run can merge this item without repeating the
+      // work: every gate passed and the independent reviewer said PASS.
+      mergeable: true,
       worktree,
       branch,
       head,
@@ -1380,20 +1386,36 @@ async function main() {
   // implementation phase, N items at a time
   const queue = selected.slice(0, args.maxItems);
   const results = [];
-  const concurrency = Math.max(1, args.workers);
-  let cursor = 0;
-  async function worker() {
-    for (;;) {
-      const index = cursor++;
-      if (index >= queue.length) return;
-      const item = queue[index];
+  if (args.mergeOnly) {
+    // Recovery path: merge the items that already passed every gate and the
+    // independent review, without running a worker again. Used when the
+    // merge itself failed (a diverged base, a conflict) and the work is good.
+    log("\n=== merge-only mode: no workers are spawned ===");
+    for (const item of queue) {
+      const s = state.items[item.id];
+      if (!s?.mergeable) {
+        log(`\n=== ${item.id} ===\n  not mergeable - no recorded gate pass (skipped)`);
+        continue;
+      }
       log(`\n=== ${item.id} (${item.state}) ${item.section} ===`);
-      const r = await runItem(item, ctx);
-      results.push({ item, ...r });
-      fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf8");
+      results.push({ item, ...s });
     }
+  } else {
+    const concurrency = Math.max(1, args.workers);
+    let cursor = 0;
+    async function worker() {
+      for (;;) {
+        const index = cursor++;
+        if (index >= queue.length) return;
+        const item = queue[index];
+        log(`\n=== ${item.id} (${item.state}) ${item.section} ===`);
+        const r = await runItem(item, ctx);
+        results.push({ item, ...r });
+        fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf8");
+      }
+    }
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
   }
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
   // merge phase, one at a time, in checklist order (not completion order, so
   // the sequence is deterministic and dependent items land in the right order)

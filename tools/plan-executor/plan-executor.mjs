@@ -1335,6 +1335,7 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
   let unsticks = 0;
   let blockedCommands = 0;
   let workingTrailer = 0;
+  let apiErrors = 0;
   for (;;) {
     const status = await agentStatus(address);
     const state = status?.status?.state ?? status?.state ?? "unknown";
@@ -1365,6 +1366,30 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
       if (seconds < 20) {
         onLog?.(`    note: the turn ended after ${seconds}s - that is too fast to be work`);
       }
+      return current;
+    }
+
+    // The model API can fail. A 503 ends the turn with an error instead of a
+    // report, and the worker never got to do anything - so the turn is sent
+    // again rather than counted as an attempt. We saw a whole item fail three
+    // times in a row because the inference gateway was under pressure, and
+    // the log said only "the worker did not end with a status trailer".
+    //
+    // Only the END of the screen counts: an API error in the middle of a turn
+    // is one Claude Code recovered from by itself, and re-sending the prompt
+    // then would cut the turn short.
+    const screenTail = current.split(/\r?\n/).slice(-12).join("\n");
+    if (/API Error:\s*5\d\d|Service temporarily unavailable|resource pressure/i.test(screenTail)) {
+      apiErrors++;
+      if (apiErrors <= 3) {
+        onLog?.(
+          `    the model API failed (${apiErrors}/3) - sending the prompt again`,
+        );
+        await hc(["send", address, text, "--json"]);
+        await sleep(5000);
+        continue;
+      }
+      onLog?.(`    the model API failed three times - giving up on this turn`);
       return current;
     }
 
@@ -1443,18 +1468,31 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
   }
 }
 
+/**
+ * Read the worker's report off the screen.
+ *
+ * Two things are on that screen besides the report: the brief the worker read
+ * (removed by `stripBrief`) and the item text, which the harness itself put
+ * there when it told the worker what the item is. The item text is prose, and
+ * prose contains the same words the report format uses - the P0.7 item says
+ * "must return `{ changed: false }` without changing anything", and a
+ * case-insensitive read of the report picked that up as the worker's list of
+ * changed files.
+ *
+ * So the field names are matched case-SENSITIVELY: the report format is
+ * upper case, and prose is not. The values are still read leniently, because
+ * a worker that writes "Done" has still written "done".
+ */
 function parseReport(screen, { ignoreText = null } = {}) {
   const clean = stripBrief(screen, ignoreText);
   const lines = clean.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const tail = lines.slice(-120);
   const joined = tail.join("\n");
-  // Return the capture group of the last match, so "VERDICT: PASS" yields
-  // "PASS" and not the second character of the matched text.
-  const last = (re) => {
-    const matches = [...joined.matchAll(re)];
+  // The value of a field: the last line that starts with the field's name.
+  const field = (name) => {
+    const matches = [...joined.matchAll(new RegExp(`^${name}:[ \\t]*(.*)$`, "gm"))];
     if (!matches.length) return null;
-    const m = matches[matches.length - 1];
-    return m.length > 1 ? m[1] : m[0];
+    return matches[matches.length - 1][1].trim();
   };
   // A field can run over several lines: "TESTS:" is followed by one line per
   // command, and taking only the first of them loses every command but one -
@@ -1478,24 +1516,32 @@ function parseReport(screen, { ignoreText = null } = {}) {
     }
     return out.length ? out.join(" | ") : null;
   };
+  const oneOf = (value, ...allowed) => {
+    if (!value) return null;
+    const v = value.trim().toLowerCase();
+    return allowed.includes(v) ? v : null;
+  };
   return {
-    status: last(/STATUS:\s*(done|blocked)/gi)?.toLowerCase() ?? null,
-    itemState: last(/ITEM_STATE:\s*(complete|partial)/gi)?.toLowerCase() ?? null,
-    remaining: last(/REMAINING:\s*(.+)/gi)?.trim() ?? null,
+    status: oneOf(field("STATUS"), "done", "blocked"),
+    itemState: oneOf(field("ITEM_STATE"), "complete", "partial"),
+    remaining: field("REMAINING"),
     // The item's wording after the change. A checklist item often states a
     // gap ("... is not implemented"); when the worker closes that gap, the
     // wording is no longer true, and a ticked item whose text says the feature
     // is missing is worse than an unticked one. The orchestrator owns the
     // checklist file, so the worker *reports* the new wording and the
     // orchestrator writes it.
-    itemText: last(/ITEM_TEXT:\s*(.+)/gi)?.trim() ?? null,
-    verdict: last(/VERDICT:\s*(PASS|FAIL)/gi)?.toUpperCase() ?? null,
-    resolved: last(/RESOLVED:\s*(yes|no)/gi)?.toLowerCase() ?? null,
-    conflicts: last(/CONFLICTS:\s*(.+)/gi)?.trim() ?? null,
-    changed: block("CHANGED") ?? last(/CHANGED:\s*(.+)/gi)?.trim() ?? null,
-    tests: block("TESTS") ?? last(/TESTS:\s*(.+)/gi)?.trim() ?? null,
-    reasons: last(/REASONS:\s*([\s\S]+)/gi)?.trim() ?? null,
-    blocked: last(/BLOCKED:\s*(.+)/gi)?.trim() ?? null,
+    itemText: field("ITEM_TEXT"),
+    verdict: (() => {
+      const v = field("VERDICT");
+      return v ? v.trim().toUpperCase() : null;
+    })(),
+    resolved: oneOf(field("RESOLVED"), "yes", "no"),
+    conflicts: field("CONFLICTS"),
+    changed: block("CHANGED") ?? field("CHANGED"),
+    tests: block("TESTS") ?? field("TESTS"),
+    reasons: field("REASONS"),
+    blocked: field("BLOCKED"),
     tail,
   };
 }
@@ -2433,6 +2479,7 @@ async function recordBlockedItems(entries, ctx) {
     return;
   }
   const today = new Date().toISOString().slice(0, 10);
+  const before = fs.readFileSync(checklistAbs, "utf8");
   for (const entry of blocked) {
     const why = (entry.failures ?? [])
       .map((f) => `${f.gate}: ${f.detail}`)
@@ -2449,7 +2496,14 @@ async function recordBlockedItems(entries, ctx) {
     if (existing >= 0) lines.splice(existing, 1);
     lines.splice(evidenceIdx + 1, 0, line);
   }
-  fs.writeFileSync(checklistAbs, lines.join("\n"), "utf8");
+  const after = lines.join("\n");
+  if (after === before) {
+    // The log already says this - a previous run recorded the same reason.
+    // There is nothing to commit, and "nothing to commit" is not a failure.
+    log(`  the Evidence Log already said this - nothing to write`);
+    return;
+  }
+  fs.writeFileSync(checklistAbs, after, "utf8");
   await git(["add", checklistRel], REPO_ROOT);
   const c = await git(
     ["commit", "-m", `docs(checklist): record the items that did not pass the gates`],
@@ -2457,7 +2511,41 @@ async function recordBlockedItems(entries, ctx) {
     120_000,
   );
   log(`  recorded ${blocked.length} blocked item(s) in the Evidence Log`);
-  if (c.code !== 0) log(`  (the checklist commit failed: ${c.stderr?.slice(0, 200)})`);
+  if (c.code !== 0 && !/nothing to commit/i.test(`${c.stdout}${c.stderr}`)) {
+    log(`  (the checklist commit failed: ${c.stderr?.slice(0, 200)})`);
+  }
+}
+
+/**
+ * Merge the items of one batch, one at a time, in checklist order.
+ *
+ * The order is the checklist's, not the order the workers finished in, so the
+ * sequence is deterministic and dependent items land in the right order.
+ */
+async function mergeBatch(entries, ctx) {
+  const { state, stateFile, log } = ctx;
+  for (const entry of entries) {
+    if (entry.status !== "ready") {
+      // The reason belongs in the durable record, not only in the live state
+      // file: "blocked" without "why" is not a record, it is a shrug.
+      const why = (entry.failures ?? [])
+        .map((f) => `${f.gate}: ${f.detail}`)
+        .join(" | ");
+      log(
+        `${entry.itemId}: blocked, left in place for inspection` +
+          (why ? ` — ${why.slice(0, 900)}` : ""),
+      );
+      continue;
+    }
+    ctx.item = entry.item;
+    const m = await mergeItem(entry, ctx);
+    state.items[entry.itemId] = {
+      ...state.items[entry.itemId],
+      status: m.ok ? "done" : "blocked",
+      merge: m.reason ?? null,
+    };
+    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf8");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2580,7 +2668,7 @@ async function main() {
     // `baseRef` is the branch it points at. The branch moves during a run, so
     // the merge phase resolves the tip of `baseRef` again before it merges.
     args, base: baseSha, baseRef: args.base,
-    packageRoot, checklistRel, checklistAbs, gates, state,
+    packageRoot, checklistRel, checklistAbs, gates, state, stateFile,
     stateDir, ledgerFile, worktreeRoot, planId, baseline, log,
     parent: args.parent,
     scopeRoots,
@@ -2607,49 +2695,37 @@ async function main() {
       // good (`mergeable`), so it goes to the merge phase as ready.
       results.push({ item, ...s, status: "ready" });
     }
+    log("\n=== merge phase ===");
+    await mergeBatch(results, ctx);
   } else {
     const concurrency = Math.max(1, args.workers);
-    let cursor = 0;
-    async function worker() {
-      for (;;) {
-        const index = cursor++;
-        if (index >= queue.length) return;
-        const item = queue[index];
-        log(`\n=== ${item.id} (${item.state}) ${item.section} ===`);
-        const r = await runItem(item, ctx);
-        results.push({ item, ...r });
-        fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf8");
-      }
-    }
-    await Promise.all(Array.from({ length: concurrency }, () => worker()));
-  }
-
-  // merge phase, one at a time, in checklist order (not completion order, so
-  // the sequence is deterministic and dependent items land in the right order)
-  log("\n=== merge phase ===");
-  const order = new Map(queue.map((item, i) => [item.id, i]));
-  results.sort((a, b) => (order.get(a.itemId) ?? 0) - (order.get(b.itemId) ?? 0));
-  for (const entry of results) {
-    if (entry.status !== "ready") {
-      // The reason belongs in the durable record, not only in the live state
-      // file: "blocked" without "why" is not a record, it is a shrug.
-      const why = (entry.failures ?? [])
-        .map((f) => `${f.gate}: ${f.detail}`)
-        .join(" | ");
+    // Implement a batch, merge the batch, then start the next one.
+    //
+    // Every item's branch is cut from the tip of the base branch when the
+    // item starts, so a batch that starts after the previous batch merged
+    // begins from the newest code - and the two items in a batch, which were
+    // written against the same tip, are the only ones that can conflict with
+    // each other. Implementing all fourteen first and merging them all
+    // afterwards meant fourteen items written against one commit: fourteen
+    // conflicts, thirteen of them with nothing to do with the work.
+    for (let start = 0; start < queue.length; start += concurrency) {
+      const batch = queue.slice(start, start + concurrency);
       log(
-        `${entry.itemId}: blocked, left in place for inspection` +
-          (why ? ` — ${why.slice(0, 900)}` : ""),
+        `\n=== batch ${Math.floor(start / concurrency) + 1}: ` +
+          `${batch.map((i) => i.id).join(", ")} ===`,
       );
-      continue;
+      const batchResults = await Promise.all(
+        batch.map(async (item) => {
+          log(`\n=== ${item.id} (${item.state}) ${item.section} ===`);
+          const r = await runItem(item, ctx);
+          fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf8");
+          return { item, ...r };
+        }),
+      );
+      results.push(...batchResults);
+      log("\n=== merge phase ===");
+      await mergeBatch(batchResults, ctx);
     }
-    ctx.item = entry.item;
-    const m = await mergeItem(entry, ctx);
-    state.items[entry.itemId] = {
-      ...state.items[entry.itemId],
-      status: m.ok ? "done" : "blocked",
-      merge: m.reason ?? null,
-    };
-    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf8");
   }
 
   // The items that did not make it are recorded in the checklist too, so the

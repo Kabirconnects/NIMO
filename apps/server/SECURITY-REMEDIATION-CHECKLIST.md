@@ -57,7 +57,9 @@ touch, and S0 is what creates one.
 
 - [ ] The login route (`apps/server/src/modules/user/users.routes.ts:19`) accepts
       unlimited attempts, so passwords can be brute-forced. Add a rate limit (by IP
-      and by account) with a clear response, and cover it with a test.
+      and by account) with a clear response, and cover it with a test. The repo has
+      no limiter dependency; a small in-memory limiter is enough — do not add a
+      framework for this.
 
 ## S3 — Memory: the per-owner policy is never loaded
 
@@ -80,8 +82,8 @@ touch, and S0 is what creates one.
 ## S5 — Web: a transient 5xx logs the user out
 
 - [ ] `apps/web/src/features/auth/hooks/use-session.ts:32` sets `retry: false` and
-      `apps/web/src/components/protected-route.tsx:28` redirects on `if (!user)`;
-      `isError` is never checked. A server hiccup therefore signs the user out.
+      `apps/web/src/features/auth/components/protected-route.tsx:28` redirects on
+      `if (!user)`; `isError` is never checked. A server hiccup therefore signs the user out.
       Distinguish "not signed in" from "could not check", and only redirect on the
       former.
 

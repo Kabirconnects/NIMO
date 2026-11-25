@@ -1164,6 +1164,13 @@ async function runItem(item, ctx) {
     );
     const head = (await git(["rev-parse", "HEAD"], worktree)).stdout.trim();
 
+    // The evidence line reports how many files the item changed, so count the
+    // files in the COMMIT - not the snapshot taken before the gates ran. The
+    // two differ: the install can add a lockfile entry mid-gate, so the
+    // snapshot was one file short of the truth.
+    const committedFiles = (await git(["diff", "--name-only", `${base}..${head}`], worktree))
+      .stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+
     // independent review
     log("  spawning independent reviewer");
     const reviewer = await spawnAgent(agentName("review", itemId), worktree, ctx.parent);
@@ -1218,7 +1225,7 @@ async function runItem(item, ctx) {
       worktree,
       branch,
       head,
-      changed: gateResult.changed,
+      changed: committedFiles.length ? committedFiles : gateResult.changed,
       commandResults: gateResult.commandResults,
       itemState: report.itemState ?? "complete",
       remaining: report.remaining ?? null,

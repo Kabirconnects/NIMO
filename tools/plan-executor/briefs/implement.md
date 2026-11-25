@@ -26,7 +26,10 @@ repository: other agents work in other worktrees. Stay strictly inside your work
    read the error literally; it usually names the exact argument or line to change.
 5. **Stay in scope.** Change files only inside: {{ALLOWED_PATHS}}. Touch as few files as
    the item requires. Do not refactor unrelated code, do not reformat untouched files,
-   do not bump dependencies. **Leave no other files behind**: no notes, reports, scratch
+   do not upgrade or bump an existing dependency. If the item needs a package that this
+   package does not declare, add it as a dependency — that is the one allowed dependency
+   change, and you do not edit `pnpm-lock.yaml` by hand (the install updates it).
+   **Leave no other files behind**: no notes, reports, scratch
    files, `MEMORY.md`, `ITEM_COMPLETE.md`, or summaries of your own work anywhere in the
    repository. The only files that change are the ones the item needs.
    The files the item points at are: {{FOCUS_FILES}}. Those are where the work belongs —
@@ -50,8 +53,9 @@ repository: other agents work in other worktrees. Stay strictly inside your work
 - Root: {{WORKTREE}}
 - Package: {{PACKAGE_ROOT}}
 
-If dependencies are missing (`node_modules` absent), run `pnpm install --frozen-lockfile
---prefer-offline` once in the worktree root first.
+If dependencies are missing (`node_modules` absent), run `pnpm install --prefer-offline`
+once in the worktree root first. If you added a dependency, that install updates the
+lockfile, which is expected.
 
 ## How to report
 

@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { itemPaths, parseChecklist, slug } from "./plan-executor.mjs";
+import { itemPaths, parseChecklist, slug, removedGuards } from "./plan-executor.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..");
@@ -136,6 +136,46 @@ check("the item state is read from the checkbox", items.map((i) => i.state), [
 
 check("the slug is stable", slug("S1 — Server: user routes have no authentication"),
   "s1-server-user-routes-have-no-authentica");
+
+// ---------------------------------------------------------------------------
+// removedGuards: the part of a diff a reviewer skims past
+// ---------------------------------------------------------------------------
+
+// This is the real diff of the S3 fix that weakened the retrieval filter: the
+// owner check and the status check were replaced by weaker ones, and the
+// reviewer passed it.
+const weakenedDiff = [
+  "diff --git a/packages/memory/src/governance/policy.ts b/packages/memory/src/governance/policy.ts",
+  "--- a/packages/memory/src/governance/policy.ts",
+  "+++ b/packages/memory/src/governance/policy.ts",
+  "@@ -203,12 +203,15 @@",
+  "-  if (node.ownerId !== ownerId) return false;",
+  "-  if (node.status !== \"active\") return false;",
+  "+  if (node.visibility === \"private\" && node.ownerId !== ownerId) return false;",
+  "+  if (node.status === \"deleted\" || node.status === \"superseded\") return false;",
+  "-  const keywords = input.keywords ?? [];",
+  "+  const keywords = [...new Set(input.keywords ?? [])];",
+].join("\n");
+
+check(
+  "a removed ownership check is found",
+  removedGuards(weakenedDiff).some((g) => g.includes("node.ownerId !== ownerId")),
+  true,
+);
+
+check(
+  "a removed status check is found",
+  removedGuards(weakenedDiff).some((g) => g.includes('node.status !== "active"')),
+  true,
+);
+
+check(
+  "a removed line that is not a guard is not reported",
+  removedGuards(weakenedDiff).some((g) => g.includes("const keywords = input.keywords")),
+  false,
+);
+
+check("a diff with no removed lines has no guards", removedGuards(""), []);
 
 // ---------------------------------------------------------------------------
 

@@ -1296,6 +1296,41 @@ function parseReport(screen) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The removed lines in a diff that look like a guard being taken away.
+ *
+ * A change that removes a check - ownership, status, a limit, a permission -
+ * is not wrong by itself, but it is the part of a diff that most needs a second
+ * pair of eyes. A reviewer reading a whole diff tends to check the code that
+ * was ADDED; the code that was REMOVED is easy to skim past. So the removed
+ * lines that mention a guard are pulled out and handed to the reviewer as a
+ * question.
+ *
+ * This never decides anything on its own. It only makes sure the question is
+ * asked.
+ */
+function removedGuards(diffText) {
+  const guardWords =
+    /\b(owner|ownership|status|visibility|permission|permissions|role|roles|auth|authoriz|token|secret|credential|policy|policies|limit|allowed|allow|deny|denied|disabled|enabled|validation|validate|isRetrievable|safe|unsafe|quarantine|archiv)/i;
+  const looksLikeAComparison =
+    /(===|!==|==|!=|>=|<=|<|>|\breturn\b|\bthrow\b|\bif\b|\bunless\b)/;
+  const out = [];
+  let file = "";
+  for (const line of (diffText ?? "").split(/\r?\n/)) {
+    if (line.startsWith("+++ b/")) {
+      file = line.slice(6);
+      continue;
+    }
+    if (!line.startsWith("-") || line.startsWith("---")) continue;
+    const text = line.slice(1).trim();
+    if (!text || text.length > 200) continue;
+    if (!guardWords.test(text)) continue;
+    if (!looksLikeAComparison.test(text)) continue;
+    out.push(`${file}: ${text}`);
+  }
+  return out.slice(0, 20);
+}
+
+/**
  * Run the independent reviewer over an item's diff.
  *
  * The reviewer is a model, not proof: it reads the diff and looks for the
@@ -1318,11 +1353,17 @@ async function runIndependentReview({
     BASE_SHA: base,
     HEAD_SHA: head,
     DIFF_FILE: path.join(briefDir, `${prefix}.diff`),
+    REMOVED_GUARDS: "(none found)",
   };
   // The reviewer may not be able to run shell commands in this environment, so
   // the orchestrator writes the diff out for it to read.
   const diffText = (await git(["diff", `${base}..${head}`], worktree)).stdout;
   fs.writeFileSync(reviewVars.DIFF_FILE, diffText, "utf8");
+  const guards = removedGuards(diffText);
+  if (guards.length) {
+    reviewVars.REMOVED_GUARDS = guards.join("\n");
+    log(`  the diff removes ${guards.length} line(s) that look like a guard - asking the reviewer about them`);
+  }
   const reviewBrief = renderBrief(
     fs.readFileSync(path.join(BRIEFS, "review.md"), "utf8"),
     reviewVars,
@@ -2246,4 +2287,11 @@ if (isEntryPoint) {
   });
 }
 
-export { itemPaths, parseChecklist, slug, collectFailures, patchSignature };
+export {
+  itemPaths,
+  parseChecklist,
+  slug,
+  collectFailures,
+  patchSignature,
+  removedGuards,
+};

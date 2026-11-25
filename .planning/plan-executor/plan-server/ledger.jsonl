@@ -1016,3 +1016,24 @@
 {"ts":"2026-11-25T10:28:33.209Z","msg":"  merged and recorded: s3-memory-the-per-owner-policy-is-never--01"}
 {"ts":"2026-11-25T10:28:33.211Z","msg":"\nsummary: 9 merged, 0 blocked"}
 {"ts":"2026-11-25T10:28:33.211Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-server\\state.json"}
+{"ts":"2026-11-25T10:47:14.923Z","msg":"\n=== s9-memory-the-policy-fix-weakened-the-re-01 (open) S9 — Memory: the policy fix weakened the retrieval filter ==="}
+{"ts":"2026-11-25T10:47:14.931Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-server\\s9-memory-the-policy-fix-weakened-the-re-01"}
+{"ts":"2026-11-25T10:47:14.932Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory"}
+{"ts":"2026-11-25T10:47:14.932Z","msg":"  focus:    packages/memory/src/governance/policy.ts, packages/memory/src/retrieval/activate.ts, packages/memory/src/graph/planner.ts:84,97, packages/memory/package.json, packages/memory/src/domain/memory.types.ts, packages/memory/scripts/<name>-test.ts, packages/memory/src/graph/planner.ts"}
+{"ts":"2026-11-25T10:47:15.574Z","msg":"  installing dependencies in the worktree..."}
+{"ts":"2026-11-25T10:47:47.809Z","msg":"  implementer: t3b"}
+{"ts":"2026-11-25T10:47:47.811Z","msg":"  attempt 1: briefing implementer"}
+{"ts":"2026-11-25T10:57:52.336Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T10:57:53.288Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T10:57:55.960Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T10:57:59.364Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T10:58:06.273Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T10:58:11.821Z","msg":"    proof: the tests fail without the change (4 new failure(s))"}
+{"ts":"2026-11-25T10:58:11.878Z","msg":"  gates passed"}
+{"ts":"2026-11-25T10:58:12.257Z","msg":"  spawning independent reviewer"}
+{"ts":"2026-11-25T11:00:10.238Z","msg":"  review PASSED"}
+{"ts":"2026-11-25T11:00:10.423Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T11:00:10.552Z","msg":"  merging onto main @ e381c13"}
+{"ts":"2026-11-25T11:01:16.437Z","msg":"  merged and recorded: s9-memory-the-policy-fix-weakened-the-re-01"}
+{"ts":"2026-11-25T11:01:16.439Z","msg":"\nsummary: 10 merged, 0 blocked"}
+{"ts":"2026-11-25T11:01:16.439Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-server\\state.json"}

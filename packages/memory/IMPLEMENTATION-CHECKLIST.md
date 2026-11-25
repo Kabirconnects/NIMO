@@ -38,6 +38,57 @@ recorded in the Evidence Log. No item is checked merely because code exists.
 - [x] Retrieval does not modify confidence, importance, degree or access counters.
 - [x] Multi-table operations are transactional; inner failures roll back to a savepoint.
 
+### P0.7 Policy settings that still have no effect
+
+- [ ] The owner's policy reaches the write paths, but three of its settings are still read
+      by nobody, and the parameter that was added for them is never used:
+      - `allowAutomaticEvolution` (`src/domain/governance.types.ts:24`) — nothing reads it,
+        so an owner who switches automatic evolution off still has their memories evolved
+        automatically.
+      - `maxMemoryConfidenceForAutoActivation` (`:28`) — nothing reads it, so a memory
+        below the owner's confidence floor is still activated.
+      - `maxEvidenceAgeDays` (`:27`) — nothing reads it, so evidence older than the
+        owner's limit is still used.
+      `isRetrievable` (`src/governance/policy.ts:207`) already takes a `policy` parameter
+      and never reads it. The function must stay pure — it is called for every candidate
+      and `src/storage/db.ts` already imports it, so it may not do I/O — so the **caller**
+      loads the owner's policy once per call and passes it in.
+      The rules:
+      - **Evidence age — every retrieval.** `isRetrievable` uses the policy it is given:
+        when the policy sets `maxEvidenceAgeDays`, a node whose **newest** evidence is
+        older than the limit is not retrievable. A node with no evidence is not aged out,
+        and a policy that sets no limit does not filter on age.
+      - **Confidence floor — auto activation only.** In the activation path
+        (`src/retrieval/activate.ts`), a neighbour reached from a seed is *auto-activated*:
+        when the owner's policy sets a confidence floor, a neighbour whose confidence is
+        below `maxMemoryConfidenceForAutoActivation` is not activated. A memory a query
+        matched directly is returned whatever its confidence — the setting is about auto
+        activation.
+      - **Automatic evolution.** `evolve()` (`src/graph/evolve.ts:61`) must refuse to
+        evolve automatically when `allowAutomaticEvolution` is false: the causes
+        `"new_evidence"` and `"consolidation"` are automatic and must return
+        `{ changed: false }` without changing anything; `"user_correction"` is the user
+        acting, so it still works.
+      - Every call site that filters nodes must pass the owner's policy, not the default:
+        `src/retrieval/search.ts:108,182`, `src/retrieval/activate.ts:53`,
+        `src/graph/planner.ts:51,85,98`. Load the policy once per call, not once per node.
+      Testing this: the memory package's tests are plain `tsx scripts/<name>-test.ts`
+      runners (`packages/memory/package.json`, `test:all`). Put the test in its own
+      `scripts/<name>-test.ts` file **and add it to the `test:all` script** — a test that
+      nothing runs is not a test. The database path comes from `PAME_DB_PATH`
+      (`packages/memory/src/storage/db.ts:29`) and the handle is opened on first use, so
+      set `PAME_DB_PATH` to a temporary file **before** the first import that touches the
+      store. The test needs a policy row per owner (`setPolicy`), a node with a known
+      confidence and a known evidence age, and it must show that:
+      - the same node is retrievable for an owner with no limits and is **not** retrievable
+        for an owner whose `maxEvidenceAgeDays` is smaller than the evidence's age;
+      - a graph neighbour below the owner's confidence floor is not activated, while a
+        neighbour above it is;
+      - `evolve()` with cause `"new_evidence"` changes nothing for an owner whose
+        `allowAutomaticEvolution` is false, and still works for an owner whose policy
+        allows it; a `"user_correction"` still works for the owner who disabled automatic
+        evolution.
+
 ## P1 — Memory Engine Correctness
 
 - [x] P1.1 Graph degree integrity + repair (`insertEdge`/`deleteEdge`, `repairGraphDegrees`).

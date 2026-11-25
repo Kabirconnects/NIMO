@@ -20,13 +20,25 @@ commands, `git diff {{BASE_SHA}}..{{HEAD_SHA}}` in the worktree shows the same t
 Read the surrounding source for anything the diff touches. You are reviewing the code,
 not the description of it.
 
+## Removed lines that look like guards
+
+The orchestrator found these removed lines in the diff. For each one, answer: was the
+guard weakened, replaced by something equivalent, or genuinely unnecessary? If a guard
+that protected ownership, access, status, limits, permissions or validation was weakened
+without a test that pins the old behaviour, the verdict is FAIL.
+
+```
+{{REMOVED_GUARDS}}
+```
+
 ## What to check, in order
 
 1. **Completeness** — does the change actually implement the item as written, including the
    parts the implementer might have skipped? A partial implementation is a FAIL.
 2. **Leftovers** — any `TODO`, `FIXME`, `XXX`, `HACK`, `not implemented`, `unimplemented`,
    `@ts-ignore`, `@ts-expect-error`, stub, placeholder body, empty catch, commented-out code,
-   or "TODO: handle later" left in the added lines? That is an automatic FAIL.
+   "TODO: handle later", or a parameter the function never reads, left in the added lines?
+   That is an automatic FAIL.
 3. **Tests** — is there a test that would FAIL without this change and PASS with it? A test
    that asserts nothing meaningful, or no test at all for a source change, is a FAIL.
    Watch for assertions that are true by construction: a check that runs *after* a

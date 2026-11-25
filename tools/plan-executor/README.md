@@ -91,6 +91,9 @@ node tools/plan-executor/plan-executor.mjs \
 | `--parent <t>` | herdr terminal to parent the workers to (default: auto) |
 | `--plan-id <id>` | name of the state directory (default: derived from the checklist) |
 | `--merge-only` | merge items that already passed every gate and the reviewer, without spawning a worker (recovery path) |
+| `--dry-run` | print the items, the gates and the focus lines; change nothing |
+| `--record-baseline` | run the gates now and record what already fails, so pre-existing failures do not block every item |
+| `--open-only` | skip the `[~]` items and work only on the `[ ]` ones |
 
 By default every open item is worked on — both `[ ]` and `[~]`. Use `--open-only`
 to skip the partial ones.
@@ -161,7 +164,23 @@ These are not hypothetical - each one broke a real run before it was fixed.
 - **The base branch moves while the run is in progress.** Every merged item
   adds a commit. The merge phase therefore resolves the base branch's tip
   fresh; resolving the SHA captured at startup would rebase onto a stale base
-  and the fast-forward merge would fail.
+  and the fast-forward merge would fail. The gates, on the other hand, diff
+  against the base SHA captured at startup — so a commit you make to `main`
+  while the run is going does not turn your files into "worker changes" and
+  fail the scope gate. The merge still picks it up.
+- **A proof that cannot load is not always inconclusive.** A test that imports
+  a module the old code does not have is a proof — it cannot run without the
+  change. So is a test that calls a function the change *adds*: against the old
+  source it dies with "`setPolicy` is not a function". The proof compares the
+  exports before and after, so that case counts. What does not count is the old
+  source crashing on its own (it reads `import.meta.env`, say): the test never
+  ran, so it demonstrated nothing.
+- **A checklist that spans several packages has no single "its" package.** A
+  package-relative path (`src/lib/api-error.ts`) resolved against the first
+  scoped package, so the worker was pointed at a file that was not there while
+  the real one was passed over. Paths are resolved against every scoped package,
+  and the item's own package wins for a file that does not exist yet — a script
+  the item is going to create.
 - **A worktree holds a full `node_modules`** — tens of thousands of files. The
   removal gets ten minutes, falls back to deleting the directory directly, and
   says so if it still cannot be removed.

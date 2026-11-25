@@ -161,6 +161,21 @@ These are not hypothetical - each one broke a real run before it was fixed.
   adds independence over the work, never over the instruction — if both halves
   read a broken instruction, they share the blind spot instead of checking each
   other.
+- **Two items that touch the same file conflict when the first one merges.**
+  The second was written against a base that no longer exists, so its rebase
+  conflicts. That is a merge to do, not a broken item: the conflict goes to an
+  agent whose only rule is that *both* sides' intent survives, and the resolved
+  code is then re-verified — the gates, the proof against the new base, and a
+  second independent review. The other item's tests are in the tree at that
+  point, so a resolution that quietly dropped its behaviour fails there instead
+  of in production.
+- **An agent that cannot run a command writes blind.** Claude Code asks a
+  classifier whether a command is safe before it runs it, and that classifier can
+  be unavailable — every command comes back "Not run", the worker cannot see a
+  single test fail, and it guesses wrong. The harness pre-approves the tools the
+  worker needs (`--allowedTools`); if commands are refused anyway, it interrupts
+  the turn and tells the worker to finish without them, instead of letting it
+  retry for ten minutes.
 
 ## Requirements
 

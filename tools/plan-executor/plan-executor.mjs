@@ -94,8 +94,8 @@ function execCmd(command, { cwd, timeout = 600_000 } = {}) {
   });
 }
 
-const git = (args, cwd = REPO_ROOT, timeout = 120_000) =>
-  execBin("git", args, { cwd, timeout });
+const git = (args, cwd = REPO_ROOT, timeout = 120_000, env = undefined) =>
+  execBin("git", args, { cwd, timeout, env });
 const hc = (args, { cwd, timeout = 120_000 } = {}) =>
   execBin("hc", args, { cwd, timeout });
 
@@ -1155,6 +1155,8 @@ function parseReport(screen) {
     itemState: last(/ITEM_STATE:\s*(complete|partial)/gi)?.toLowerCase() ?? null,
     remaining: last(/REMAINING:\s*(.+)/gi)?.trim() ?? null,
     verdict: last(/VERDICT:\s*(PASS|FAIL)/gi)?.toUpperCase() ?? null,
+    resolved: last(/RESOLVED:\s*(yes|no)/gi)?.toLowerCase() ?? null,
+    conflicts: last(/CONFLICTS:\s*([\s\S]+)/gi)?.trim() ?? null,
     changed: last(/CHANGED:\s*(.+)/gi)?.trim() ?? null,
     tests: last(/TESTS:\s*(.+)/gi)?.trim() ?? null,
     reasons: last(/REASONS:\s*([\s\S]+)/gi)?.trim() ?? null,
@@ -1166,6 +1168,219 @@ function parseReport(screen) {
 // ---------------------------------------------------------------------------
 // worktrees
 // ---------------------------------------------------------------------------
+
+/**
+ * Run the independent reviewer over an item's diff.
+ *
+ * The reviewer is a model, not proof: it reads the diff and looks for the
+ * mistakes the mechanical gates cannot see. It never sees the conversation that
+ * produced the diff, so it cannot be talked into agreeing with it.
+ *
+ * It is also run again after a merge conflict is resolved, because that is
+ * exactly where a reviewed change can quietly lose a behaviour.
+ */
+async function runIndependentReview({
+  item, itemId, worktree, base, head, ctx, briefDir, log, prefix = "review",
+}) {
+  log("  spawning independent reviewer");
+  const reviewer = await spawnAgent(agentName(prefix, itemId), worktree, ctx.parent);
+  const reviewVars = {
+    ITEM_ID: itemId,
+    SECTION: item.section,
+    ITEM_TEXT: item.text,
+    WORKTREE: worktree,
+    BASE_SHA: base,
+    HEAD_SHA: head,
+    DIFF_FILE: path.join(briefDir, `${prefix}.diff`),
+  };
+  // The reviewer may not be able to run shell commands in this environment, so
+  // the orchestrator writes the diff out for it to read.
+  const diffText = (await git(["diff", `${base}..${head}`], worktree)).stdout;
+  fs.writeFileSync(reviewVars.DIFF_FILE, diffText, "utf8");
+  const reviewBrief = renderBrief(
+    fs.readFileSync(path.join(BRIEFS, "review.md"), "utf8"),
+    reviewVars,
+  );
+  const reviewFile = path.join(briefDir, `${prefix}.md`);
+  fs.writeFileSync(reviewFile, reviewBrief, "utf8");
+  const reviewScreen = await sendAndWait(
+    reviewer.address,
+    `Read the review brief at "${reviewFile}" and execute it exactly. The diff to review is at "${reviewVars.DIFF_FILE}". Review the diff for item ${itemId}.`,
+    { timeout: ctx.args.turnTimeout, done: /VERDICT:\s*(PASS|FAIL)/i },
+  );
+  const verdict = parseReport(reviewScreen);
+  await hc(["kill", reviewer.address]);
+  await hc(["rm", reviewer.address]);
+  return { verdict, diffFile: reviewVars.DIFF_FILE, agent: reviewer.address };
+}
+
+/**
+ * Resolve a rebase conflict with a dedicated agent.
+ *
+ * Two items that touch the same file conflict as soon as the first one is
+ * merged: the second was written against a base that no longer exists. The
+ * mechanical gates cannot resolve that - only a merge can keep both intents,
+ * and "keep one side" silently undoes a merged, reviewed item.
+ *
+ * So the conflict goes to an agent with one rule: both sides survive. The
+ * gates then run again over the resolved code, and so does the reviewer.
+ */
+async function resolveRebaseConflict({ result, ctx, baseSha, log }) {
+  const worktree = result.worktree;
+  const conflicted = (await git(["diff", "--name-only", "--diff-filter=U"], worktree)).stdout
+    .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  if (!conflicted.length) return { ok: true, note: "the conflict resolved itself" };
+
+  const dir = path.join(ctx.stateDir, "conflicts", result.itemId);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+
+  const fileList = [];
+  for (const [i, f] of conflicted.entries()) {
+    const stem = `${String(i + 1).padStart(2, "0")}-${path.basename(f)}`;
+    const baseFile = path.join(dir, `${stem}.base`);
+    const itemFile = path.join(dir, `${stem}.item`);
+    const baseShow = await git(["show", `${baseSha}:${f}`], worktree);
+    const itemShow = await git(["show", `${result.head}:${f}`], worktree);
+    fs.writeFileSync(baseFile, baseShow.code === 0 ? baseShow.stdout : "");
+    fs.writeFileSync(itemFile, itemShow.code === 0 ? itemShow.stdout : "");
+    fileList.push(
+      `- \`${f}\`\n    - base side (already merged): ${baseFile}` +
+        `\n    - item side (this item): ${itemFile}`,
+    );
+  }
+  log(`    conflicted files: ${conflicted.join(", ")}`);
+
+  const brief = renderBrief(
+    fs.readFileSync(path.join(BRIEFS, "resolve-conflict.md"), "utf8"),
+    {
+      ITEM_ID: result.itemId,
+      ITEM_TEXT: ctx.item?.text ?? "",
+      BASE_SHA: baseSha,
+      CONFLICTED_FILES: fileList.join("\n"),
+    },
+  );
+  const briefFile = path.join(dir, "resolve-conflict.md");
+  fs.writeFileSync(briefFile, brief, "utf8");
+
+  const resolver = await spawnAgent(agentName("resolve", result.itemId), worktree, ctx.parent);
+  const screen = await sendAndWait(
+    resolver.address,
+    `Read the brief at "${briefFile}" and execute it exactly. A git rebase is paused in this worktree with conflict markers in the files named in the brief - resolve every one of them and finish the rebase.`,
+    { timeout: ctx.args.turnTimeout, done: /RESOLVED:\s*(yes|no)/i },
+  );
+  const report = parseReport(screen);
+  await hc(["kill", resolver.address]);
+  await hc(["rm", resolver.address]);
+
+  // Did it actually resolve them?
+  const stillUnmerged = (await git(["diff", "--name-only", "--diff-filter=U"], worktree)).stdout
+    .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  if (stillUnmerged.length) {
+    return {
+      ok: false,
+      reason: `the conflict was not resolved (still unmerged: ${stillUnmerged.join(", ")})`,
+    };
+  }
+
+  // It may have staged the files but not continued the rebase. Finish it.
+  const gitPath = (await git(["rev-parse", "--git-path", "rebase-merge"], worktree)).stdout.trim();
+  const rebaseDir = path.resolve(worktree, gitPath);
+  if (fs.existsSync(rebaseDir)) {
+    const cont = await git(["rebase", "--continue"], worktree, 300_000, { GIT_EDITOR: "true" });
+    if (cont.code !== 0) {
+      return { ok: false, reason: `the rebase could not be finished: ${cont.stdout}${cont.stderr}` };
+    }
+  }
+
+  const note = report.conflicts
+    ? report.conflicts.split(/\r?\n/).slice(0, 4).join(" ")
+    : "the conflict was resolved";
+  return { ok: true, note, resolvedBy: report.resolved };
+}
+
+/**
+ * Re-verify an item after its code was changed by a conflict resolution.
+ *
+ * The reviewed diff is no longer the diff that is about to be merged, so the
+ * proof, the gates and the review all run again over the resolved code. The
+ * tests of the *other* item are in the tree at this point, so a resolution
+ * that dropped the other side's behaviour fails here rather than in
+ * production.
+ */
+async function verifyAfterResolution({ result, ctx, baseSha, log }) {
+  const worktree = result.worktree;
+
+  // No conflict marker may survive, anywhere in the tree.
+  const markers = await git(["grep", "-n", "-E", "^<<<<<<< |^>>>>>>> |^=======$"], worktree);
+  if (markers.code === 0 && markers.stdout.trim()) {
+    return {
+      ok: false,
+      reason: `the resolution left conflict markers in the tree:\n${markers.stdout.trim().slice(0, 400)}`,
+    };
+  }
+
+  // The resolution must not smuggle in a placeholder either - the same rule
+  // the item itself had to pass.
+  const patch = (await git(["diff", "-U0", baseSha], worktree)).stdout;
+  const added = patch
+    .split(/\r?\n/)
+    .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
+    .map((l) => l.slice(1));
+  for (const { label, re } of LEFTOVER_PATTERNS) {
+    const hits = added.filter((l) => re.test(l));
+    if (hits.length) {
+      return {
+        ok: false,
+        reason: `the resolution added lines containing ${label}: ${hits.slice(0, 3).map((h) => h.trim().slice(0, 120)).join(" | ")}`,
+      };
+    }
+  }
+
+  const install = await installDeps(worktree, log, ctx.stateDir);
+  if (!install.ok) return { ok: false, reason: "post-conflict install failed" };
+
+  for (const cmd of ctx.gates) {
+    log(`    gate: ${cmd}`);
+    const r = await execCmd(cmd, { cwd: worktree, timeout: 1_200_000 });
+    if (r.code !== 0) {
+      const detail = `${r.stdout}\n${r.stderr}`.trim().split(/\r?\n/).slice(-12).join("\n");
+      return {
+        ok: false,
+        reason: `after the conflict was resolved, \`${cmd}\` exited ${r.code}:\n${detail}`,
+      };
+    }
+  }
+
+  // The proof now compares against the NEW base: the old source is what the
+  // branch would have merged onto before the other item landed.
+  const changed = (await git(["diff", "--name-only", baseSha], worktree)).stdout
+    .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const sourceChanged = changed.filter((f) => /(^|\/)src\//.test(f));
+  const proof = await checkTestsProveTheChange({
+    worktree, base: baseSha, sourceChanged, gates: ctx.gates, baseline: ctx.baseline, onLog: log,
+  });
+  if (proof?.gate) return { ok: false, reason: `after the conflict was resolved, ${proof.gate}: ${proof.detail}` };
+  if (proof?.detail) result.proof = proof.detail;
+
+  const head = (await git(["rev-parse", "HEAD"], worktree)).stdout.trim();
+  const briefDir = path.join(os.tmpdir(), "nimo-plan", ctx.planId, result.itemId);
+  fs.mkdirSync(briefDir, { recursive: true });
+  const { verdict } = await runIndependentReview({
+    item: ctx.item, itemId: result.itemId, worktree, base: baseSha, head,
+    ctx, briefDir, log, prefix: "review2",
+  });
+  if (verdict.verdict !== "PASS") {
+    return {
+      ok: false,
+      reason: `the reviewer rejected the conflict resolution: ${verdict.verdict ?? "NO VERDICT"}: ${verdict.reasons ?? "(no reasons given)"}`,
+    };
+  }
+
+  result.head = head;
+  result.changed = changed;
+  return { ok: true };
+}
 
 /**
  * Create (or reuse) the item's worktree.
@@ -1411,35 +1626,9 @@ async function runItem(item, ctx) {
       .stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 
     // independent review
-    log("  spawning independent reviewer");
-    const reviewer = await spawnAgent(agentName("review", itemId), worktree, ctx.parent);
-    const reviewVars = {
-      ITEM_ID: itemId,
-      SECTION: item.section,
-      ITEM_TEXT: item.text,
-      WORKTREE: worktree,
-      BASE_SHA: base,
-      HEAD_SHA: head,
-      DIFF_FILE: path.join(briefDir, "review.diff"),
-    };
-    // The reviewer may not be able to run shell commands in this environment, so
-    // the orchestrator writes the diff out for it to read.
-    const diffText = (await git(["diff", `${base}..${head}`], worktree)).stdout;
-    fs.writeFileSync(reviewVars.DIFF_FILE, diffText, "utf8");
-    const reviewBrief = renderBrief(
-      fs.readFileSync(path.join(BRIEFS, "review.md"), "utf8"),
-      reviewVars,
-    );
-    const reviewFile = path.join(briefDir, "review.md");
-    fs.writeFileSync(reviewFile, reviewBrief, "utf8");
-    const reviewScreen = await sendAndWait(
-      reviewer.address,
-      `Read the review brief at "${reviewFile}" and execute it exactly. The diff to review is at "${reviewVars.DIFF_FILE}". Review the diff for item ${itemId}.`,
-      { timeout: args.turnTimeout, done: /VERDICT:\s*(PASS|FAIL)/i },
-    );
-    const verdict = parseReport(reviewScreen);
-    await hc(["kill", reviewer.address]);
-    await hc(["rm", reviewer.address]);
+    const { verdict, agent: reviewerAddress } = await runIndependentReview({
+      item, itemId, worktree, base, head, ctx, briefDir, log,
+    });
 
     if (verdict.verdict !== "PASS") {
       lastFailures = [
@@ -1469,7 +1658,7 @@ async function runItem(item, ctx) {
       proof: gateResult.proofDetail ?? null,
       itemState: report.itemState ?? "complete",
       remaining: report.remaining ?? null,
-      reviewer: reviewer.address,
+      reviewer: reviewerAddress,
       implementer: implementer.address,
     };
     break;
@@ -1515,6 +1704,7 @@ async function mergeItem(result, ctx) {
   }
 
   let merged = false;
+  let resolvedConflict = false;
   for (let attempt = 1; attempt <= 2 && !merged; attempt++) {
     const baseSha = (await git(["rev-parse", baseRef], REPO_ROOT)).stdout.trim();
     log(`  merging onto ${baseRef} @ ${baseSha.slice(0, 7)}`);
@@ -1522,22 +1712,46 @@ async function mergeItem(result, ctx) {
     // rebase onto the current base (other items may have merged first)
     const rebase = await git(["rebase", baseSha], result.worktree, 300_000);
     if (rebase.code !== 0) {
-      await git(["rebase", "--abort"], result.worktree);
-      log(`  rebase conflict -> item blocked`);
-      return { ok: false, reason: "rebase conflict" };
+      // Two items that touch the same file conflict as soon as the first one
+      // lands: the second was written against a base that no longer exists.
+      // That is not a broken item - it is a merge that needs doing. So it goes
+      // to an agent whose only rule is "both sides survive", and the gates and
+      // the reviewer run again over the resolved code.
+      log("  rebase conflict -> resolving");
+      const resolution = await resolveRebaseConflict({ result, ctx, baseSha, log });
+      if (!resolution.ok) {
+        await git(["rebase", "--abort"], result.worktree);
+        log(`  conflict could not be resolved -> item blocked`);
+        return { ok: false, reason: resolution.reason };
+      }
+      log(`  conflict resolved: ${resolution.note}`);
+      // The evidence line says so: an item that had to be merged by hand is
+      // not the same claim as one that merged cleanly.
+      result.conflictResolution = resolution.note;
+
+      const verified = await verifyAfterResolution({ result, ctx, baseSha, log });
+      if (!verified.ok) {
+        log(`  the resolution did not survive re-verification -> item blocked`);
+        return { ok: false, reason: verified.reason };
+      }
+      log("  the resolved code passed the gates, the proof and the review");
+      // The gates below would run exactly the same commands again.
+      resolvedConflict = true;
     }
 
     // re-run the commands after the rebase
-    const install = await installDeps(result.worktree, log, ctx.stateDir);
-    if (!install.ok) {
-      log("  post-rebase install failed");
-      return { ok: false, reason: "post-rebase install failed" };
-    }
-    for (const cmd of ctx.gates) {
-      const r = await execCmd(cmd, { cwd: result.worktree, timeout: 1_200_000 });
-      if (r.code !== 0) {
-        log(`  post-rebase gate failed: ${cmd}`);
-        return { ok: false, reason: `post-rebase gate failed: ${cmd}` };
+    if (!resolvedConflict) {
+      const install = await installDeps(result.worktree, log, ctx.stateDir);
+      if (!install.ok) {
+        log("  post-rebase install failed");
+        return { ok: false, reason: "post-rebase install failed" };
+      }
+      for (const cmd of ctx.gates) {
+        const r = await execCmd(cmd, { cwd: result.worktree, timeout: 1_200_000 });
+        if (r.code !== 0) {
+          log(`  post-rebase gate failed: ${cmd}`);
+          return { ok: false, reason: `post-rebase gate failed: ${cmd}` };
+        }
       }
     }
 
@@ -1578,9 +1792,12 @@ async function mergeItem(result, ctx) {
     .join("; ");
   const diffStat = result.changed.length;
   const proofText = result.proof ? `; proof: ${result.proof}` : "";
+  const conflictText = result.conflictResolution
+    ? `; merged after a conflict with an earlier item (${result.conflictResolution})`
+    : "";
   const entry =
     `- ${new Date().toISOString().slice(0, 10)} — ${item.id}: ${item.text.slice(0, 90)} ` +
-    `(${summary}; ${diffStat} file(s) changed${proofText}; independent review: PASS` +
+    `(${summary}; ${diffStat} file(s) changed${proofText}${conflictText}; independent review: PASS` +
     `${partial ? `; still partial: ${result.remaining ?? "gap not stated"}` : ""}).`;
   if (evidenceIdx >= 0) {
     // One authoritative line per item: a re-run replaces that item's old line

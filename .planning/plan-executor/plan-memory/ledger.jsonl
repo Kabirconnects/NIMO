@@ -201,3 +201,46 @@
 {"ts":"2026-11-25T05:31:33.808Z","msg":"  merged and recorded: c-temporal-memory-03"}
 {"ts":"2026-11-25T05:31:33.809Z","msg":"\nsummary: 2 merged, 0 blocked"}
 {"ts":"2026-11-25T05:31:33.809Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}
+{"ts":"2026-11-25T11:14:51.534Z","msg":"\n=== p0-7-policy-settings-that-still-have-no--01 (open) P0.7 Policy settings that still have no effect ==="}
+{"ts":"2026-11-25T11:14:51.543Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\p0-7-policy-settings-that-still-have-no--01"}
+{"ts":"2026-11-25T11:14:51.543Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory"}
+{"ts":"2026-11-25T11:14:51.543Z","msg":"  focus:    packages/memory/package.json, packages/memory/src/storage/db.ts, packages/memory/src/domain/governance.types.ts, packages/memory/src/governance/policy.ts, packages/memory/src/retrieval/activate.ts, packages/memory/src/graph/evolve.ts, packages/memory/src/retrieval/search.ts:108,182, packages/memory/src/graph/planner.ts:51,85,98, packages/memory/scripts/<name>-test.ts, packages/memory/src/retrieval/search.ts, packages/memory/src/graph/planner.ts"}
+{"ts":"2026-11-25T11:14:52.154Z","msg":"  installing dependencies in the worktree..."}
+{"ts":"2026-11-25T11:15:20.334Z","msg":"  implementer: t3d"}
+{"ts":"2026-11-25T11:15:20.335Z","msg":"  attempt 1: briefing implementer"}
+{"ts":"2026-11-25T11:44:42.958Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T11:44:43.970Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T11:44:46.904Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T11:44:49.388Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T11:44:54.598Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T11:45:00.484Z","msg":"    proof: the tests fail without the change (3 new failure(s))"}
+{"ts":"2026-11-25T11:45:00.541Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T11:45:00.543Z","msg":"  attempt 2: briefing implementer"}
+{"ts":"2026-11-25T11:47:44.901Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T11:47:45.809Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T11:47:48.368Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T11:47:50.493Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T11:47:55.624Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T11:48:02.288Z","msg":"    proof: the tests fail without the change (3 new failure(s))"}
+{"ts":"2026-11-25T11:48:02.390Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T11:48:02.394Z","msg":"  attempt 3: briefing implementer"}
+{"ts":"2026-11-25T11:48:13.214Z","msg":"  running mechanical gates..."}
+{"ts":"2026-11-25T11:48:14.112Z","msg":"    gate: pnpm --filter @workspace/memory run typecheck"}
+{"ts":"2026-11-25T11:48:16.818Z","msg":"    gate: pnpm --filter @workspace/memory run lint"}
+{"ts":"2026-11-25T11:48:18.852Z","msg":"    gate: pnpm --filter @workspace/memory run test:all"}
+{"ts":"2026-11-25T11:48:24.000Z","msg":"    proof: re-running the tests against the pre-change source (pnpm --filter @workspace/memory run test:all)"}
+{"ts":"2026-11-25T11:48:29.835Z","msg":"    proof: the tests fail without the change (3 new failure(s))"}
+{"ts":"2026-11-25T11:48:29.905Z","msg":"  gates failed: command"}
+{"ts":"2026-11-25T11:48:30.131Z","msg":"\n=== merge phase ==="}
+{"ts":"2026-11-25T11:48:30.133Z","msg":"p0-7-policy-settings-that-still-have-no--01: blocked, left in place for inspection"}
+{"ts":"2026-11-25T11:48:30.133Z","msg":"\nsummary: 2 merged, 1 blocked"}
+{"ts":"2026-11-25T11:48:30.133Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-memory\\state.json"}
+{"ts":"2026-11-25T11:58:39.774Z","msg":"\n=== p0-7-policy-settings-that-still-have-no--01 (open) P0.7 Policy settings that still have no effect ==="}
+{"ts":"2026-11-25T11:58:39.782Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-memory\\p0-7-policy-settings-that-still-have-no--01"}
+{"ts":"2026-11-25T11:58:39.782Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory"}
+{"ts":"2026-11-25T11:58:39.782Z","msg":"  focus:    packages/memory/package.json, packages/memory/src/storage/db.ts, packages/memory/src/domain/governance.types.ts, packages/memory/src/governance/policy.ts, packages/memory/src/retrieval/activate.ts, packages/memory/src/graph/evolve.ts, packages/memory/src/retrieval/search.ts:108,182, packages/memory/src/graph/planner.ts:51,85,98, packages/memory/scripts/<name>-test.ts, packages/memory/src/retrieval/search.ts, packages/memory/src/graph/planner.ts"}
+{"ts":"2026-11-25T11:58:40.347Z","msg":"  reusing the existing worktree from a previous run"}
+{"ts":"2026-11-25T11:58:40.348Z","msg":"  the previous run failed with: command"}
+{"ts":"2026-11-25T11:58:40.348Z","msg":"  starting from the fix brief, with those failures in it"}
+{"ts":"2026-11-25T11:58:42.918Z","msg":"  implementer: t3f"}
+{"ts":"2026-11-25T11:58:42.920Z","msg":"  attempt 2: briefing implementer"}

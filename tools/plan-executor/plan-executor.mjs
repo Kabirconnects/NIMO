@@ -1306,7 +1306,14 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
       continue;
     }
 
-    if (Date.now() > deadline) return screenSincePrompt(await readScreen(address), marker);
+    if (Date.now() > deadline) {
+      // The worker is probably still writing. Interrupt it: the gates are about
+      // to read the worktree, and a tree that is changing under them gives an
+      // answer to a question nobody asked.
+      await hc(["keys", address, "esc"]);
+      await sleep(2000);
+      return screenSincePrompt(await readScreen(address), marker);
+    }
     await sleep(3000);
   }
 }

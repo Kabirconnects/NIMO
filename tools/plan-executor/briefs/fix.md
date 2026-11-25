@@ -35,6 +35,8 @@ other worktrees. Stay strictly inside your worktree.
 
 - Root: {{WORKTREE}}
 - Package: {{PACKAGE_ROOT}}
+- Stay inside: {{ALLOWED_PATHS}}
+- The files the item points at: {{FOCUS_FILES}}
 
 ## How to report
 

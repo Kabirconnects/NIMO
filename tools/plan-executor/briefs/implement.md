@@ -29,6 +29,8 @@ repository: other agents work in other worktrees. Stay strictly inside your work
    do not bump dependencies. **Leave no other files behind**: no notes, reports, scratch
    files, `MEMORY.md`, `ITEM_COMPLETE.md`, or summaries of your own work anywhere in the
    repository. The only files that change are the ones the item needs.
+   The files the item points at are: {{FOCUS_FILES}}. Those are where the work belongs —
+   but you may add the test files the item needs elsewhere inside the scope above.
 6. **Do not edit the checklist** (`{{CHECKLIST_PATH}}`) or any evidence log. The
    orchestrator writes those. Editing them breaks the merge.
 7. **Do not commit.** Leave your changes in the working tree. The orchestrator commits.

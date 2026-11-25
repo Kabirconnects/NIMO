@@ -214,20 +214,40 @@ function parseChecklist(file) {
   return { raw, lines, items, evidenceHeading };
 }
 
-/** Paths named by the item, e.g. `src/storage/db.ts`, resolved to package-relative. */
-function itemPaths(item, packageRoot) {
+/**
+ * Paths named by the item, e.g. `src/storage/db.ts`, as repo-relative paths.
+ *
+ * The item text mixes two kinds of path: repo-relative ones (`apps/server`)
+ * and package-relative ones (`src/storage/db.ts`). Both have to be resolved
+ * against the repo, or a path like `apps/server` ends up pointing at
+ * `<checklist's package>/apps/server` - a directory that does not exist.
+ *
+ * Only paths that exist (or whose directory exists, for a file to be created)
+ * are returned: the text also contains things like `tsx scripts/<name>-test.ts`
+ * and `echo 'no tests' && exit 0`, which are not paths at all.
+ */
+function itemPaths(item, packageRoot, repoRoot) {
   const found = new Set();
   const candidates = [];
   for (const m of item.text.matchAll(/`([^`]+)`/g)) candidates.push(m[1]);
   for (const m of item.text.matchAll(/\b((?:src|scripts|test|tests)\/[\w./*-]+)/g))
     candidates.push(m[1]);
+  const pkgRel = path.relative(repoRoot, packageRoot).replace(/\\/g, "/");
   for (const raw of candidates) {
     const token = raw.trim().replace(/[.,;)]+$/, "");
     if (!token || token.length > 120) continue;
     if (!/[/\\]|\.(ts|tsx|js|json|md)$/.test(token)) continue;
     if (/^https?:/i.test(token)) continue;
     const normalized = token.replace(/\\/g, "/");
-    found.add(normalized);
+    // A path inside a package is package-relative; anything else is
+    // repo-relative.
+    const repoRel = /^(src|scripts|test|tests)\//.test(normalized)
+      ? path.posix.join(pkgRel, normalized)
+      : normalized;
+    const abs = path.join(repoRoot, repoRel);
+    const dir = path.dirname(abs);
+    if (!fs.existsSync(abs) && !fs.existsSync(dir)) continue;
+    found.add(repoRel);
   }
   return [...found];
 }
@@ -963,15 +983,16 @@ async function runItem(item, ctx) {
   const briefDir = path.join(os.tmpdir(), "nimo-plan", ctx.planId, itemId);
   fs.mkdirSync(briefDir, { recursive: true });
 
-  const paths = itemPaths(item, packageRoot);
   const scopeRoots = ctx.scopeRoots ?? [packageRoot];
-  const allowed = paths.length
-    ? paths.map((p) => path.join(packageRoot, p)).join(", ")
-    : scopeRoots.join(", ");
+  // The scope is what the gate enforces: the packages an item may touch.
+  // The files the item names are only guidance - where the work belongs.
+  const allowed = scopeRoots.join(", ");
+  const focus = itemPaths(item, packageRoot, REPO_ROOT);
   const gateText = gates.join("\n");
 
   log(`  worktree: ${worktree}`);
   log(`  scope:    ${allowed}`);
+  if (focus.length) log(`  focus:    ${focus.join(", ")}`);
 
   const wt = await makeWorktree(worktree, branch, base, ctx.stateDir, log);
   if (wt.reused) log("  reusing the existing worktree from a previous run");
@@ -1013,6 +1034,7 @@ async function runItem(item, ctx) {
       WORKTREE: worktree,
       PACKAGE_ROOT: packageRoot,
       ALLOWED_PATHS: allowed,
+      FOCUS_FILES: focus.join(", ") || "(none named - work it out from the item)",
       GATE_COMMANDS: gateText,
       CHECKLIST_PATH: checklistRel,
       FAILURES: lastFailures

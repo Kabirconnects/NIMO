@@ -205,10 +205,11 @@ export function evaluateWrite(
 
 /** Owner + visibility + status filter applied to retrieval results. */
 export function isRetrievable(node: MemoryNode, ownerId: string, policy: MemoryPolicy = DEFAULT_POLICY): boolean {
-  if (node.status === "deleted" || node.status === "superseded") {
+  // Defence in depth: repositories also scope by ownerId in the query.
+  if (node.ownerId !== ownerId) {
     return false;
   }
-  if (node.visibility === "private" && node.ownerId !== ownerId) {
+  if (node.status !== "active") {
     return false;
   }
   const nowTime = Date.now();

@@ -1379,17 +1379,17 @@ async function sendAndWait(address, text, { timeout = 1800, done = null, blocked
     // is one Claude Code recovered from by itself, and re-sending the prompt
     // then would cut the turn short.
     const screenTail = current.split(/\r?\n/).slice(-12).join("\n");
-    if (/API Error:\s*5\d\d|Service temporarily unavailable|resource pressure/i.test(screenTail)) {
+    if (/API Error:/i.test(screenTail)) {
       apiErrors++;
-      if (apiErrors <= 3) {
+      if (apiErrors <= 4) {
         onLog?.(
-          `    the model API failed (${apiErrors}/3) - sending the prompt again`,
+          `    the model API failed (${apiErrors}/4) - waiting and sending the prompt again`,
         );
         await hc(["send", address, text, "--json"]);
-        await sleep(5000);
+        await sleep(15_000);
         continue;
       }
-      onLog?.(`    the model API failed three times - giving up on this turn`);
+      onLog?.(`    the model API failed four times - giving up on this turn`);
       return current;
     }
 
@@ -1654,6 +1654,97 @@ async function patchSignature(worktree, base, head) {
 }
 
 /**
+ * Resolve a conflict whose two sides are command lists, mechanically.
+ *
+ * Every item in a package that has a test suite adds its test to the same
+ * `test:all` script, so every pair of items conflicts on the same line of the
+ * same file - and the conflict is always the same shape: both sides are the
+ * same command list with one more command in it.
+ *
+ * That is a merge a machine does better than an agent: split both sides on
+ * `&&`, and if one side's commands are all in the other side's, the longer
+ * list is the merge. Anything else returns null, and the conflict goes to the
+ * resolver agent as before.
+ *
+ * The result is still checked by the gates, the proof and the review, so a
+ * wrong merge here cannot land.
+ */
+function resolveCommandListConflict(text) {
+  if (!text || !text.includes("<<<<<<<")) return null;
+  const blocks = [...text.matchAll(
+    // The newline after the closing marker is NOT consumed: it belongs to the
+    // file, and dropping it glues the next line onto the resolved one.
+    /<<<<<<<[^\n]*\r?\n([\s\S]*?)\r?\n?=======\r?\n([\s\S]*?)>>>>>>>[^\n]*(?=\r?\n|$)/g,
+  )];
+  if (!blocks.length) return null;
+
+  let out = text;
+  const notes = [];
+  // A command in a JSON line ends with the line's own punctuation - `"..."`,
+  // a trailing comma - so the parts are compared without it. Otherwise the
+  // base's last command ("...retrievable-filter-test.ts",) never matches the
+  // item's ("...retrievable-filter-test.ts") and nothing is a subset of
+  // anything.
+  const part = (s) => s.trim().replace(/["',;)\s]+$/, "");
+  for (const b of blocks) {
+    const ours = b[1].replace(/\r\n/g, "\n");
+    const theirs = b[2].replace(/\r\n/g, "\n");
+    const oursParts = ours.split(/\s*&&\s*/).map(part).filter(Boolean);
+    const theirsParts = theirs.split(/\s*&&\s*/).map(part).filter(Boolean);
+    let chosen = null;
+    let how = "";
+    if (oursParts.length && theirsParts.length) {
+      if (oursParts.every((p) => theirsParts.includes(p))) {
+        chosen = theirs;
+        how = "the item's command list has everything the base's has";
+      } else if (theirsParts.every((p) => oursParts.includes(p))) {
+        chosen = ours;
+        how = "the base's command list has everything the item's has";
+      }
+    }
+    if (chosen === null) return null;
+    notes.push(how);
+    out = out.replace(b[0], chosen.replace(/\n$/, ""));
+  }
+  return { text: out, notes };
+}
+
+/**
+ * Try to settle a conflict without an agent.
+ *
+ * Only when EVERY conflicted file is a command-list conflict - otherwise the
+ * conflict goes to the resolver agent, whose rule is that both sides' intent
+ * survives.
+ */
+async function resolveMechanically(conflicted, worktree, log) {
+  const resolved = [];
+  const notes = [];
+  for (const f of conflicted) {
+    const abs = path.join(worktree, f);
+    let text = "";
+    try {
+      text = fs.readFileSync(abs, "utf8");
+    } catch {
+      return null;
+    }
+    const r = resolveCommandListConflict(text);
+    if (!r) return null;
+    fs.writeFileSync(abs, r.text, "utf8");
+    resolved.push(f);
+    notes.push(`${f}: ${r.notes.join("; ")}`);
+  }
+  for (const f of resolved) await git(["add", "--", f], worktree);
+  const stillUnmerged = (await git(["diff", "--name-only", "--diff-filter=U"], worktree)).stdout
+    .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  if (stillUnmerged.length) {
+    log(`    the mechanical merge did not settle it - handing it to an agent`);
+    return null;
+  }
+  log(`    resolved mechanically: ${notes.join("; ")}`);
+  return { ok: true, note: `resolved mechanically - ${notes.join("; ")}`, resolvedBy: "mechanical" };
+}
+
+/**
  * Resolve a rebase conflict with a dedicated agent.
  *
  * Two items that touch the same file conflict as soon as the first one is
@@ -1689,6 +1780,12 @@ async function resolveRebaseConflict({ result, ctx, baseSha, log }) {
     );
   }
   log(`    conflicted files: ${conflicted.join(", ")}`);
+
+  // Try the machine first. The conflict that every pair of items in a package
+  // produces is the same one - two command lists in one file - and it has one
+  // right answer. An agent spends a whole turn on it, and can get it wrong.
+  const mechanical = await resolveMechanically(conflicted, worktree, log);
+  if (mechanical) return mechanical;
 
   const brief = renderBrief(
     fs.readFileSync(path.join(BRIEFS, "resolve-conflict.md"), "utf8"),
@@ -2761,4 +2858,5 @@ export {
   agentName,
   parseReport,
   hasTrailer,
+  resolveCommandListConflict,
 };

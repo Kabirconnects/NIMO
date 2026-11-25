@@ -19,6 +19,7 @@ import {
   agentName,
   parseReport,
   hasTrailer,
+  resolveCommandListConflict,
 } from "./plan-executor.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -446,6 +447,91 @@ check(
   parseReport(half.split(/\r?\n/).map((l) => `  ${l}`).join("\n"), {
     ignoreText: splitBrief,
   }).status,
+  null,
+);
+
+// ---------------------------------------------------------------------------
+// the conflict every pair of items in a package produces
+// ---------------------------------------------------------------------------
+//
+// Each item adds its own test to the same `test:all` script, so the conflict
+// is always the same shape: two command lists in one file. It has one right
+// answer, and a machine gives it faster and more reliably than an agent.
+
+const commandConflict = [
+  "{",
+  '  "scripts": {',
+  '    "test:agi": "tsx scripts/agi-test.ts",',
+  "<<<<<<< HEAD",
+  '    "test:all": "tsx scripts/agi-test.ts && tsx scripts/retrievable-filter-test.ts",',
+  "=======",
+  '    "test:all": "tsx scripts/agi-test.ts && tsx scripts/retrievable-filter-test.ts && tsx scripts/policy-settings-test.ts",',
+  ">>>>>>> 9d0c38d",
+  '    "ci": "npm test"',
+  "  }",
+  "}",
+].join("\n");
+
+check(
+  "a command list conflict is resolved mechanically",
+  resolveCommandListConflict(commandConflict)?.text.includes(
+    "tsx scripts/policy-settings-test.ts",
+  ),
+  true,
+);
+
+check(
+  "the mechanical merge keeps the base's commands too",
+  resolveCommandListConflict(commandConflict)?.text.includes(
+    "tsx scripts/retrievable-filter-test.ts",
+  ),
+  true,
+);
+
+check(
+  "the mechanical merge leaves no conflict markers",
+  resolveCommandListConflict(commandConflict)?.text.includes("<<<<<<<"),
+  false,
+);
+
+check(
+  "the mechanical merge still parses as JSON",
+  (() => {
+    try {
+      JSON.parse(resolveCommandListConflict(commandConflict)?.text ?? "");
+      return true;
+    } catch {
+      return false;
+    }
+  })(),
+  true,
+);
+
+const codeConflict = [
+  "<<<<<<< HEAD",
+  "  if (node.ownerId !== ownerId) return false;",
+  "=======",
+  "  if (node.visibility === 'private' && node.ownerId !== ownerId) return false;",
+  ">>>>>>> 9d0c38d",
+].join("\n");
+
+check(
+  "a conflict that is not a command list is left to an agent",
+  resolveCommandListConflict(codeConflict),
+  null,
+);
+
+check(
+  "a conflict with two different command lists is left to an agent",
+  resolveCommandListConflict(
+    [
+      "<<<<<<< HEAD",
+      "  \"test:all\": \"tsx scripts/a-test.ts\"",
+      "=======",
+      "  \"test:all\": \"tsx scripts/b-test.ts\"",
+      ">>>>>>> 9d0c38d",
+    ].join("\n"),
+  ),
   null,
 );
 

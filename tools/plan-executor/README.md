@@ -169,13 +169,19 @@ These are not hypothetical - each one broke a real run before it was fixed.
   second independent review. The other item's tests are in the tree at that
   point, so a resolution that quietly dropped its behaviour fails there instead
   of in production.
+- **The code that lands must be the code that was reviewed.** A rebase always
+  changes the commit, and a conflict resolution changes the code. The changed
+  lines are recorded at review time and compared with the changed lines after
+  the rebase; if they differ, the change is proved and reviewed again before it
+  merges.
 - **An agent that cannot run a command writes blind.** Claude Code asks a
   classifier whether a command is safe before it runs it, and that classifier can
   be unavailable — every command comes back "Not run", the worker cannot see a
   single test fail, and it guesses wrong. The harness pre-approves the tools the
   worker needs (`--allowedTools`); if commands are refused anyway, it interrupts
   the turn and tells the worker to finish without them, instead of letting it
-  retry for ten minutes.
+  retry for ten minutes. The same applies to the conflict resolver: it needs
+  `git add` and `git rebase`, or it can edit the file but not finish the merge.
 
 ## Requirements
 

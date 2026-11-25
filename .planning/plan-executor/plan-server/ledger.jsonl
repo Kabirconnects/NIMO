@@ -799,3 +799,21 @@
 {"ts":"2026-11-25T09:00:14.129Z","msg":"  merged and recorded: s2-server-login-has-no-rate-limiting-01"}
 {"ts":"2026-11-25T09:00:14.130Z","msg":"\nsummary: 5 merged, 0 blocked"}
 {"ts":"2026-11-25T09:00:14.130Z","msg":"state:   D:\\Projects\\nimo-v2.0.0\\nimo\\.planning\\plan-executor\\plan-server\\state.json"}
+{"ts":"2026-11-25T09:09:45.833Z","msg":"\n=== s6-web-logout-leaves-a-stale-session-beh-01 (open) S6 — Web: logout leaves a stale session behind on error ==="}
+{"ts":"2026-11-25T09:09:45.840Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-server\\s6-web-logout-leaves-a-stale-session-beh-01"}
+{"ts":"2026-11-25T09:09:45.841Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\server, D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\web, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\agents"}
+{"ts":"2026-11-25T09:09:45.841Z","msg":"  focus:    apps/web/src/features/auth/hooks/use-logout.ts:15-17"}
+{"ts":"2026-11-25T09:09:45.850Z","msg":"\n=== s7-web-raw-internal-error-text-reaches-t-01 (open) S7 — Web: raw internal error text reaches the UI ==="}
+{"ts":"2026-11-25T09:09:45.852Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-server\\s7-web-raw-internal-error-text-reaches-t-01"}
+{"ts":"2026-11-25T09:09:45.852Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\server, D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\web, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\agents"}
+{"ts":"2026-11-25T09:09:45.852Z","msg":"  focus:    apps/web/src/lib/api-error.ts:34-35, api-error.ts, apps/server/src/lib/api-error.ts, apps/server/scripts/web-test.ts"}
+{"ts":"2026-11-25T09:09:45.858Z","msg":"\n=== s8-web-the-production-api-url-is-a-place-01 (open) S8 — Web: the production API URL is a placeholder ==="}
+{"ts":"2026-11-25T09:09:45.860Z","msg":"  worktree: C:\\Users\\Himanshu Arodia\\.herdr\\plan\\plan-server\\s8-web-the-production-api-url-is-a-place-01"}
+{"ts":"2026-11-25T09:09:45.860Z","msg":"  scope:    D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\server, D:\\Projects\\nimo-v2.0.0\\nimo\\apps\\web, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\memory, D:\\Projects\\nimo-v2.0.0\\nimo\\packages\\agents"}
+{"ts":"2026-11-25T09:09:45.860Z","msg":"  focus:    apps/web/src/lib/api-client.ts:3-4, api-client.ts, apps/server/src/lib/api-client.ts"}
+{"ts":"2026-11-25T09:09:46.342Z","msg":"    seeded env files from the examples: apps/server/.env"}
+{"ts":"2026-11-25T09:09:46.342Z","msg":"  installing dependencies in the worktree..."}
+{"ts":"2026-11-25T09:09:46.353Z","msg":"    seeded env files from the examples: apps/server/.env"}
+{"ts":"2026-11-25T09:09:46.354Z","msg":"  installing dependencies in the worktree..."}
+{"ts":"2026-11-25T09:09:46.363Z","msg":"    seeded env files from the examples: apps/server/.env"}
+{"ts":"2026-11-25T09:09:46.363Z","msg":"  installing dependencies in the worktree..."}

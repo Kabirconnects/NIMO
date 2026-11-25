@@ -310,9 +310,25 @@ const TEST_FILE_RE = /(^|\/)(test|tests|spec|__tests__)\/|(^|\/)[^/]*\.(test|spe
 /** Failing test identifiers in a suite's output, e.g. "FAIL [PERMISSIONS] Chat cannot write memory". */
 function collectFailures(output) {
   const found = new Set();
+  // The repo has more than one convention: the memory suite prints
+  // "FAIL <name>", the test scripts S0 introduced print "<cross mark> <name>".
+  // A collector that only knows one of them reports a real test failure as
+  // "the command died without naming a failure" - which is how a proof that
+  // had already succeeded was reported as inconclusive.
+  const patterns = [
+    /^\s*FAIL\s+(.+?)\s*$/,
+    /^\s*[✗✘✕❌]\s*(.+?)\s*$/,
+    /^\s*not ok\s+\d*\s*-?\s*(.+?)\s*$/i,
+  ];
   for (const line of output.split(/\r?\n/)) {
-    const m = /^\s*FAIL\s+(.+?)\s*$/.exec(line);
-    if (m) found.add(m[1].trim());
+    for (const re of patterns) {
+      const m = re.exec(line);
+      if (m) {
+        const name = m[1].trim();
+        if (name) found.add(name);
+        break;
+      }
+    }
   }
   return [...found];
 }
@@ -924,6 +940,12 @@ function detectModal(screen) {
   }
   if (/Enter to continue/i.test(tail)) return { kind: "enter-continue", keys: ["enter"] };
   if (/waiting for your input|press enter/i.test(tail)) return { kind: "waiting-input", keys: ["enter"] };
+  // A permission prompt: "Allow this read outside the working directories?
+  // <cursor> 1. Yes, ...". Option 1 is the permissive one in every prompt
+  // Claude Code shows here, so enter accepts it.
+  if (/^\s*❯\s*1\.\s*Yes/im.test(tail) && /allow|approve|proceed|permission/i.test(tail)) {
+    return { kind: "permission-prompt", keys: ["enter"] };
+  }
   return null;
 }
 

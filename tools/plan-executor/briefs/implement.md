@@ -34,6 +34,10 @@ repository: other agents work in other worktrees. Stay strictly inside your work
    repository. The only files that change are the ones the item needs.
    The files the item points at are: {{FOCUS_FILES}}. Those are where the work belongs —
    but you may add the test files the item needs elsewhere inside the scope above.
+   Every path in this brief is **relative to the worktree root** below, and the worktree
+   is the only place you read and write. If a path does not exist there, look for it
+   inside the worktree — never read or write anything outside it, and never guess a
+   directory name.
 6. **Do not edit the checklist** (`{{CHECKLIST_PATH}}`) or any evidence log. The
    orchestrator writes those. Editing them breaks the merge.
 7. **Do not commit.** Leave your changes in the working tree. The orchestrator commits.

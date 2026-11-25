@@ -29,6 +29,8 @@ not the description of it.
    or "TODO: handle later" left in the added lines? That is an automatic FAIL.
 3. **Tests** — is there a test that would FAIL without this change and PASS with it? A test
    that asserts nothing meaningful, or no test at all for a source change, is a FAIL.
+   Watch for assertions that are true by construction: a check that runs *after* a
+   repair, migration, seed or fixup step proves nothing about the thing it checks.
 4. **Correctness** — real bugs: wrong conditions, off-by-one, missing null/empty handling,
    unhandled error paths, incorrect async ordering, races, wrong SQL, resource leaks.
 5. **Regressions** — does this break existing behaviour or existing tests?

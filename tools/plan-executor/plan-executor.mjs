@@ -256,8 +256,80 @@ function collectFailures(output) {
 }
 
 /**
+ * Proof gate: the new tests must fail against the pre-change source.
+ *
+ * A test that passes before and after the change proves nothing. This is the
+ * one check a reviewer cannot be trusted with - it is mechanical. The source
+ * files the item changed are rolled back to the base version, the tests are
+ * left as the worker wrote them, and the test suite is run again. If it is
+ * still green, the tests do not demonstrate the change and the item fails.
+ *
+ * Items that only add tests (no source change) are exempt: there is no
+ * "before" behaviour for them to contradict.
+ */
+async function checkTestsProveTheChange({ worktree, base, sourceChanged, gates, baseline, onLog }) {
+  const testCmds = gates.filter((g) => /\btest\b/i.test(g));
+  if (!sourceChanged.length || !testCmds.length) return null;
+
+  const cmd = testCmds[0];
+  onLog?.(`    proof: re-running the tests against the pre-change source`);
+
+  // Back up the worker's source files, so they can be restored exactly.
+  const backup = fs.mkdtempSync(path.join(os.tmpdir(), "plan-executor-proof-"));
+  const files = sourceChanged.map((rel) => {
+    const abs = path.join(worktree, rel);
+    const dest = path.join(backup, rel.replace(/[\\/]/g, "__"));
+    fs.copyFileSync(abs, dest);
+    return { rel, abs, dest };
+  });
+  const beforeDiff = (await git(["diff", base, "--", ...sourceChanged], worktree)).stdout;
+
+  try {
+    await git(["checkout", base, "--", ...sourceChanged], worktree);
+    const r = await execCmd(cmd, { cwd: worktree, timeout: 1_200_000 });
+    const output = `${r.stdout}\n${r.stderr}`;
+    const currentFailures = collectFailures(output);
+    const known = baseline?.commands?.[cmd] ?? [];
+    const newFailures = currentFailures.filter((f) => !known.includes(f));
+
+    if (r.code === 0) {
+      return {
+        gate: "proof",
+        detail:
+          `the tests still pass against the pre-change source, so they do not prove ` +
+          `this change: \`${cmd}\` exited 0 with the old ${sourceChanged.join(", ")} in place. ` +
+          `Write a test that fails without the change.`,
+      };
+    }
+    if (known.length && !newFailures.length) {
+      return {
+        gate: "proof",
+        detail:
+          `the tests do not prove this change: with the pre-change source in place, ` +
+          `\`${cmd}\` failed only for reasons that already failed at baseline.`,
+      };
+    }
+    onLog?.(`    proof: the tests fail without the change (${newFailures.length || "compile"} new failure(s))`);
+    return null;
+  } finally {
+    // Put the worker's source back, byte for byte.
+    for (const f of files) fs.copyFileSync(f.dest, f.abs);
+    fs.rmSync(backup, { recursive: true, force: true, maxRetries: 5 });
+    const afterDiff = (await git(["diff", base, "--", ...sourceChanged], worktree)).stdout;
+    if (afterDiff !== beforeDiff) {
+      onLog?.(`    proof: WARNING - the source files were not restored exactly`);
+    }
+  }
+}
+
+/**
  * Allow-list the packages pnpm refused to build, in the worktree's
  * pnpm-workspace.yaml.
+ *
+ * `value` is `true` to let the package build, `false` to skip its build script
+ * explicitly. The latter is what pnpm wants when a package ships a prebuilt
+ * binary: the script is not needed, and saying "false" stops pnpm from failing
+ * the whole install with ERR_PNPM_IGNORED_BUILDS.
  *
  * The edit is surgical on purpose: rewriting the file would normalise its line
  * endings and turn a one-line change into a whole-file diff, which then
@@ -265,7 +337,7 @@ function collectFailures(output) {
  * because pnpm re-runs its install check before every script; `restoreHarnessPatches`
  * undoes it before anything is committed.
  */
-function allowBuildsInWorktree(worktree, output) {
+function allowBuildsInWorktree(worktree, output, value = "true") {
   const ignored = /Ignored build scripts:\s*(.+)/i.exec(output);
   if (!ignored) return null;
   const names = [
@@ -278,17 +350,26 @@ function allowBuildsInWorktree(worktree, output) {
   ];
   const wsFile = path.join(worktree, "pnpm-workspace.yaml");
   if (!fs.existsSync(wsFile)) return null;
-  const text = fs.readFileSync(wsFile, "utf8");
+  let text = fs.readFileSync(wsFile, "utf8");
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  const add = names
-    .filter((n) => !new RegExp(`^\\s*${n}:`, "m").test(text))
-    .map((n) => `  ${n}: true`)
-    .join(eol);
-  if (!add) return null;
-  const patched = /allowBuilds:\r?\n/.test(text)
-    ? text.replace(/allowBuilds:\r?\n/, `allowBuilds:${eol}${add}${eol}`)
-    : `${text.replace(/\s*$/, "")}${eol}${eol}allowBuilds:${eol}${add}${eol}`;
-  fs.writeFileSync(wsFile, patched, "utf8");
+
+  // Update entries that already exist, add the ones that do not.
+  const missing = [];
+  for (const name of names) {
+    const existing = new RegExp(`^(\\s*)${name}:\\s*\\S+`, "m");
+    if (existing.test(text)) {
+      text = text.replace(existing, `$1${name}: ${value}`);
+    } else {
+      missing.push(name);
+    }
+  }
+  if (missing.length) {
+    const add = missing.map((n) => `  ${n}: ${value}`).join(eol);
+    text = /allowBuilds:\r?\n/.test(text)
+      ? text.replace(/allowBuilds:\r?\n/, `allowBuilds:${eol}${add}${eol}`)
+      : `${text.replace(/\s*$/, "")}${eol}${eol}allowBuilds:${eol}${add}${eol}`;
+  }
+  fs.writeFileSync(wsFile, text, "utf8");
   return "pnpm-workspace.yaml";
 }
 
@@ -349,9 +430,25 @@ async function installDeps(worktree, log, stateDir) {
   let r = await run();
   if (r.code === 0) return { ok: true, patched: [] };
   const output = `${r.stdout}\n${r.stderr}`;
-  const patchedFile = allowBuildsInWorktree(worktree, output);
-  if (!patchedFile) return { ok: false, output, patched: [] };
-  log("    install blocked by pnpm's build policy - allow-listing and retrying");
+
+  // First try letting the package build. If its build script fails (no local
+  // toolchain), fall back to skipping it: many native packages ship a prebuilt
+  // binary, and skipping is better than failing every install.
+  let patchedFile = allowBuildsInWorktree(worktree, output, "true");
+  if (patchedFile) {
+    log("    install blocked by pnpm's build policy - allowing the build and retrying");
+    if (stateDir) recordHarnessPatch(stateDir, worktree, patchedFile);
+    r = await run();
+    if (r.code === 0) return { ok: true, patched: [patchedFile] };
+  }
+
+  // The build itself failed: skip the build script instead.
+  const retryOutput = `${r.stdout}\n${r.stderr}`;
+  patchedFile =
+    allowBuildsInWorktree(worktree, retryOutput, "false") ??
+    patchedFile ??
+    allowBuildsInWorktree(worktree, output, "false");  if (!patchedFile) return { ok: false, output, patched: [] };
+  log("    the build script failed - skipping it and retrying");
   if (stateDir) recordHarnessPatch(stateDir, worktree, patchedFile);
   r = await run();
   return {
@@ -510,6 +607,12 @@ async function runGates({
     }
   }
 
+  // the tests must actually demonstrate the change
+  const proof = await checkTestsProveTheChange({
+    worktree, base, sourceChanged, gates, baseline, onLog,
+  });
+  if (proof) failures.push(proof);
+
   return { failures, changed, notes, commandResults: results };
 }
 
@@ -538,6 +641,11 @@ function agentName(prefix, itemId) {
  * to boot. A prompt sent during that window is either dropped or answered
  * before the agent is ready, and the turn looks like it finished immediately
  * with no output - which is how a reviewer ends up reporting "NO VERDICT".
+ *
+ * The readiness marker is the status line at the very bottom of the screen
+ * ("auto mode on ... shift+tab to cycle"), because that line is only painted
+ * once the TUI is fully up. Matching anywhere on the screen is too early: the
+ * welcome banner contains a "❯" of its own.
  */
 async function waitForAgentReady(address, { timeout = 120_000 } = {}) {
   const deadline = Date.now() + timeout;
@@ -552,9 +660,16 @@ async function waitForAgentReady(address, { timeout = 120_000 } = {}) {
       await sleep(1000);
       continue;
     }
-    if (state !== "working" && /❯|auto mode on|\bWaiting for your input\b/i.test(screen)) {
-      return true;
-    }
+    const bottom = screen
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .slice(-6)
+      .join("\n");
+    const ready =
+      /auto mode on|shift\+tab to cycle|Waiting for your input/i.test(bottom) ||
+      /^\s*❯\s*$/m.test(bottom);
+    if (state !== "working" && ready) return true;
     await sleep(2000);
   }
   return false;
@@ -641,6 +756,7 @@ async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) 
   // A freshly spawned agent can report "idle" for a moment before it starts.
   const startDeadline = Date.now() + 30_000;
   let sawWorking = false;
+  let resent = false;
   let unsticks = 0;
   for (;;) {
     const status = await agentStatus(address);
@@ -666,6 +782,15 @@ async function sendAndWait(address, text, { timeout = 1800, done = null } = {}) 
       const again = await readScreen(address);
       if (done && hasTrailer(again, done)) return again;
       return again;
+    }
+
+    // The agent never picked the prompt up (it was sent too early). Send it
+    // again rather than waiting for a turn that will never happen.
+    if (!sawWorking && !resent && Date.now() > startDeadline + 15_000) {
+      resent = true;
+      await hc(["send", address, text, "--json"]);
+      startDeadline = Date.now() + 30_000;
+      continue;
     }
 
     if (Date.now() > deadline) return await readScreen(address);

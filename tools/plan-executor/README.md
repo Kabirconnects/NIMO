@@ -76,6 +76,7 @@ node tools/plan-executor/plan-executor.mjs \
 | `--checklist <path>` | the markdown checklist (required) |
 | `--base <branch>` | branch to build on and merge into (default `main`) |
 | `--package <name>` | pnpm workspace package (default: inferred from the checklist path) |
+| `--scope <a,b>` | packages an item may touch (default: the checklist's package) |
 | `--workers <n>` | items implemented in parallel (default 2) |
 | `--attempts <n>` | implement attempts per item before giving up (default 3) |
 | `--only <id,id>` | run only these item ids |
@@ -83,7 +84,7 @@ node tools/plan-executor/plan-executor.mjs \
 | `--gates "<cmd;cmd>"` | override the gate commands |
 | `--turn-timeout <sec>` | max wait per agent turn (default 1800) |
 | `--record-baseline` | record currently-failing tests and exit |
-| `--open-only` | only `[ ]` items, skip `[~]` partial ones |
+| `--include-partial` | also work on `[~]` items (default: only `[ ]`) |
 | `--drop-blocked` | delete blocked items' worktrees instead of keeping them |
 | `--dry-run` | parse and print, change nothing |
 | `--parent <t>` | herdr terminal to parent the workers to (default: auto) |
@@ -99,10 +100,35 @@ full mapping.
 
 ```
 .planning/plan-executor/<plan-id>/
-  baseline.json   failing tests at baseline, per gate command
-  state.json      per-item status, worktree, branch, failures
-  ledger.jsonl    append-only event log
+  baseline.json       failing tests at baseline, per gate command
+  state.json          per-item status, worktree, branch, failures
+  ledger.jsonl        append-only event log
+  harness-patched.json  files the harness itself patched (kept out of commits)
 ```
+
+## Things that will bite you
+
+These are not hypothetical - each one broke a real run before it was fixed.
+
+- **The gates diff the worktree against the base branch.** A worktree left over
+  from an earlier run was created against an older base commit, so every change
+  the base made since then looked like the worker's work and the item was blocked
+  for scope violations it never committed. Reused worktrees are now rebased onto
+  the current base before anything else happens.
+- **pnpm re-checks its install state before every script.** A worktree that
+  cannot be installed fails every gate for a reason that has nothing to do with
+  the item. The harness installs first and, if pnpm's build-script policy blocks
+  a native dependency, allow-lists it in the worktree - then restores the file,
+  because an environment fix is not the worker's work and must not enter the
+  commit.
+- **A fresh agent is not ready when `hc run` returns.** Sending the brief during
+  the boot window means the prompt is dropped, and the turn looks like it
+  finished instantly with no output. The harness waits for the UI to reach a
+  prompt before sending.
+- **Screen scraping is the weakest link.** The report trailer is read from the
+  terminal, so it must be matched by regex over the visible lines. A stray
+  "VERDICT:" in the agent's reasoning would be misread, so the trailer is only
+  accepted in the last few lines of the screen.
 
 ## Requirements
 
@@ -115,9 +141,18 @@ full mapping.
 
 Any markdown file with `- [ ]` / `- [~]` / `- [x]` items and a `## Evidence Log`
 heading works. The package is inferred from the checklist's directory, so a checklist
-at `packages/foo/PLAN.md` uses `@workspace/foo`'s gates.
+at `packages/foo/PLAN.md` uses `@workspace/foo`'s gates. A checklist that spans
+several packages passes `--scope packages/foo,packages/bar`, and each package in
+scope contributes its own typecheck/lint/test to the gate list.
 
-## Known limits
+## Partial items are not ticked off
+
+An item can be partly satisfied — the checklist's `[~]` state. The worker has to
+say which: `ITEM_STATE: complete` or `ITEM_STATE: partial` plus the exact
+remaining gap. A partial item stays `[~]`, the gap is appended to the item's
+line, and the Evidence Log records that it is still partial. The orchestrator
+never turns a partial item into a completed one.
+
 
 - Items that must land in sequence (item B depends on A's API) should be run with
   `--only` in order; parallel items that touch the same file can end up conflicting at
@@ -129,3 +164,7 @@ at `packages/foo/PLAN.md` uses `@workspace/foo`'s gates.
   genuine (needs a human decision), it will burn its attempts and end as blocked —
   which is the correct outcome, but wastes tokens. Prefer a short `--attempts` when
   the plan is known to need decisions.
+- The checklist's wording is the spec. If an item says "documentation only", a
+  worker that rewrites code to satisfy it has misunderstood — the reviewer is the
+  last check on that.
+
